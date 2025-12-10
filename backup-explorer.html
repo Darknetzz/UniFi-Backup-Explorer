@@ -1134,9 +1134,34 @@
                 try {
                     const dataToDecompress = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
                     const decompressed = pako.inflate(dataToDecompress);
-                    content = new TextDecoder().decode(decompressed);
-                    isText = true;
-                    displayType = 'gzip-text';
+                    
+                    // Check if decompressed data is BSON
+                    if (decompressed.length > 4) {
+                        const firstBytes = Array.from(decompressed.slice(0, 20));
+                        const hasSelectCollection = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length))).includes('selectcollection');
+                        
+                        if (hasSelectCollection || (firstBytes.some(b => b < 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09))) {
+                            // This is BSON data
+                            content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
+                                     `This file contains MongoDB BSON data with database collections.\n\n` +
+                                     `To view the full contents:\n` +
+                                     `1. Download the ZIP file\n` +
+                                     `2. Extract the file (it will be named without .gz extension)\n` +
+                                     `3. Use MongoDB tools: bsondump ${file.name.replace('.gz', '')} > output.json\n\n` +
+                                     `Preview of raw data:\n` +
+                                     generateHexDump(decompressed.slice(0, 512));
+                            displayType = 'bson';
+                            isText = true;
+                        } else {
+                            content = new TextDecoder().decode(decompressed);
+                            isText = true;
+                            displayType = 'gzip-text';
+                        }
+                    } else {
+                        content = new TextDecoder().decode(decompressed);
+                        isText = true;
+                        displayType = 'gzip-text';
+                    }
                 } catch (e) {
                     // If gzip decompression fails, show hex dump
                     console.log('Failed to decompress gzip file:', e);
@@ -1208,6 +1233,7 @@
             
             let typeLabel = '';
             if (displayType === 'gzip-text') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(decompressed from .gz)</span>';
+            else if (displayType === 'bson') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(BSON database file)</span>';
             else if (displayType === 'hex') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(hex dump - binary file)</span>';
             
             modal.innerHTML = `
