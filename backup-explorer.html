@@ -261,6 +261,11 @@
             background: #d1ecf1;
             color: #0c5460;
         }
+        
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
     </style>
 </head>
 <body>
@@ -307,7 +312,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-bzip2/1.3.8/bzip2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script>
+        console.log('pako library loaded:', typeof pako !== 'undefined' ? 'YES' : 'NO');
+        if (typeof pako !== 'undefined') console.log('pako.inflate available:', typeof pako.inflate);
+        
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const infoSection = document.getElementById('infoSection');
@@ -379,10 +388,11 @@
                     }
                 );
                 
-                const decryptedBytes = wordArrayToUint8Array(decrypted);
+                let decryptedBytes = wordArrayToUint8Array(decrypted);
                 
                 console.log('Decrypted size:', decryptedBytes.length);
                 console.log('Decrypted first 20 bytes:', Array.from(decryptedBytes.slice(0, 20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                console.log('Decrypted last 20 bytes:', Array.from(decryptedBytes.slice(-20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
                 
                 // Check if this is a ZIP file (magic bytes: PK)
                 if (decryptedBytes[0] !== 0x50 || decryptedBytes[1] !== 0x4b) {
@@ -391,12 +401,295 @@
                 
                 console.log('SUCCESS: Found valid ZIP file!');
                 
+                // Find the actual ZIP end to handle any trailing padding
+                // ZIP files end with the End of Central Directory (EOCD) record
+                // which has magic bytes 0x50 0x4b 0x05 0x06
+                let foundEnd = false;
+                
+                // Search backwards from near the end for EOCD signature
+                // The EOCD must be in the last 65557 bytes per ZIP spec, but search the whole file
+                for (let i = decryptedBytes.length - 22; i >= 0; i--) {
+                    // Check for EOCD signature at this position (need at least 22 bytes from here)
+                    if (i + 21 < decryptedBytes.length &&
+                        decryptedBytes[i] === 0x50 && decryptedBytes[i+1] === 0x4b && 
+                        decryptedBytes[i+2] === 0x05 && decryptedBytes[i+3] === 0x06) {
+                        
+                        console.log('Found EOCD at offset:', i);
+                        foundEnd = true;
+                        
+                        // Read the comment length (bytes 20-21 of EOCD, little-endian)
+                        const commentLength = decryptedBytes[i+20] | (decryptedBytes[i+21] << 8);
+                        console.log('Comment length:', commentLength);
+                        
+                        // EOCD record size is 22 + commentLength
+                        const eocdEnd = i + 22 + commentLength;
+                        console.log('EOCD record ends at:', eocdEnd, 'Total file length:', decryptedBytes.length);
+                        
+                        // Trim any data after the EOCD
+                        if (eocdEnd < decryptedBytes.length) {
+                            console.log('Trimming', decryptedBytes.length - eocdEnd, 'trailing bytes');
+                            decryptedBytes = decryptedBytes.slice(0, eocdEnd);
+                        }
+                        break;
+                    }
+                }
+                
+                if (!foundEnd) {
+                    console.warn('Could not find EOCD record - ZIP might be truncated');
+                    // Try a more manual search - just look for the signature anywhere
+                    console.log('Attempting brute-force EOCD search...');
+                    for (let i = decryptedBytes.length - 1; i >= 0; i--) {
+                        if (decryptedBytes[i] === 0x50 && i + 3 < decryptedBytes.length &&
+                            decryptedBytes[i+1] === 0x4b && decryptedBytes[i+2] === 0x05 && decryptedBytes[i+3] === 0x06) {
+                            console.log('Found EOCD signature at offset:', i);
+                            
+                            // Found EOCD - now search for the central directory
+                            let cdOffset = -1;
+                            for (let j = i - 1; j >= 0; j--) {
+                                if (decryptedBytes[j] === 0x50 && decryptedBytes[j+1] === 0x4b && 
+                                    decryptedBytes[j+2] === 0x01 && decryptedBytes[j+3] === 0x02) {
+                                    cdOffset = j;
+                                    console.log('Found central directory at offset:', j);
+                                    break;
+                                }
+                            }
+                            
+                            if (cdOffset >= 0) {
+                                // We found both CD and EOCD - fix the EOCD
+                                const cdSize = i - cdOffset;
+                                console.log('Central directory size:', cdSize);
+                                
+                                // Read the number of entries from EOCD before fixing
+                                let numEntries = 0;
+                                if (i + 9 < decryptedBytes.length) {
+                                    numEntries = decryptedBytes[i+8] | (decryptedBytes[i+9] << 8);
+                                }
+                                console.log('Number of entries in EOCD:', numEntries);
+                                
+                                // Pad EOCD if incomplete
+                                let dataToUse = decryptedBytes;
+                                if (i + 21 >= decryptedBytes.length) {
+                                    const missingBytes = 22 - (decryptedBytes.length - i);
+                                    console.log('EOCD is incomplete - padding with', missingBytes, 'bytes');
+                                    const padding = new Uint8Array(missingBytes);
+                                    const padded = new Uint8Array(decryptedBytes.length + missingBytes);
+                                    padded.set(decryptedBytes, 0);
+                                    padded.set(padding, decryptedBytes.length);
+                                    dataToUse = padded;
+                                }
+                                
+                                // Fix the EOCD in the data
+                                dataToUse[i+16] = cdOffset & 0xff;
+                                dataToUse[i+17] = (cdOffset >> 8) & 0xff;
+                                dataToUse[i+18] = (cdOffset >> 16) & 0xff;
+                                dataToUse[i+19] = (cdOffset >> 24) & 0xff;
+                                
+                                dataToUse[i+12] = cdSize & 0xff;
+                                dataToUse[i+13] = (cdSize >> 8) & 0xff;
+                                dataToUse[i+14] = (cdSize >> 16) & 0xff;
+                                dataToUse[i+15] = (cdSize >> 24) & 0xff;
+                                
+                                console.log('EOCD corrected - CD offset:', cdOffset, 'CD size:', cdSize);
+                                decryptedBytes = dataToUse;
+                                foundEnd = true;
+                            } else {
+                                // No central directory found - try padding anyway
+                                if (i + 21 >= decryptedBytes.length) {
+                                    const missingBytes = 22 - (decryptedBytes.length - i);
+                                    console.log('EOCD is incomplete - padding with', missingBytes, 'bytes');
+                                    const padding = new Uint8Array(missingBytes);
+                                    const padded = new Uint8Array(decryptedBytes.length + missingBytes);
+                                    padded.set(decryptedBytes, 0);
+                                    padded.set(padding, decryptedBytes.length);
+                                    decryptedBytes = padded;
+                                    foundEnd = true;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                console.log('Final data size for ZIP parsing:', decryptedBytes.length);
+                
                 // Parse the ZIP file
                 try {
-                    const zip = await JSZip.loadAsync(decryptedBytes);
+                    let zip;
+                    try {
+                        zip = await JSZip.loadAsync(decryptedBytes);
+                    } catch (err) {
+                        // If JSZip fails, try to work around common issues
+                        console.log('First parse attempt failed:', err.message);
+                        
+                        // Strategy 1: Remove trailing null bytes progressively
+                        let trimmed = new Uint8Array(decryptedBytes);
+                        let trimAttempt = 1;
+                        while (trimmed.length > 1000 && trimmed[trimmed.length - 1] === 0x00) {
+                            trimmed = trimmed.slice(0, -1);
+                            console.log('Attempt', trimAttempt, ': Removing null byte, new size:', trimmed.length);
+                            try {
+                                zip = await JSZip.loadAsync(trimmed);
+                                console.log('SUCCESS with trimmed data!');
+                                break;
+                            } catch (e) {
+                                trimAttempt++;
+                            }
+                        }
+                        
+                        // Strategy 2: Try to fix the EOCD central directory offset
+                        if (!zip && decryptedBytes.length > 22) {
+                            console.log('Strategy 2: Searching for central directory and fixing EOCD...');
+                            
+                            let eocdOffset = -1;
+                            let cdOffset = -1;
+                            
+                            // Find EOCD signature (search from end backwards)
+                            for (let i = decryptedBytes.length - 1; i >= Math.max(0, decryptedBytes.length - 65557); i--) {
+                                if (decryptedBytes[i] === 0x50 && decryptedBytes[i+1] === 0x4b && 
+                                    decryptedBytes[i+2] === 0x05 && decryptedBytes[i+3] === 0x06) {
+                                    eocdOffset = i;
+                                    console.log('Found EOCD at offset:', i);
+                                    break;
+                                }
+                            }
+                            
+                            // Find central directory signature (0x50 0x4b 0x01 0x02) - search backwards from EOCD
+                            if (eocdOffset > 0) {
+                                for (let i = eocdOffset - 1; i >= 0; i--) {
+                                    if (decryptedBytes[i] === 0x50 && decryptedBytes[i+1] === 0x4b && 
+                                        decryptedBytes[i+2] === 0x01 && decryptedBytes[i+3] === 0x02) {
+                                        cdOffset = i;
+                                        console.log('Found central directory at offset:', i);
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (eocdOffset > 0 && cdOffset > 0) {
+                                console.log('Central directory found at:', cdOffset, 'EOCD at:', eocdOffset);
+                                
+                                // Calculate correct CD size
+                                const cdSize = eocdOffset - cdOffset;
+                                console.log('Calculated CD size:', cdSize);
+                                
+                                // Create a corrected copy with proper EOCD
+                                const fixed = new Uint8Array(decryptedBytes);
+                                
+                                // Read current number of entries from EOCD
+                                let numEntries = 0;
+                                if (eocdOffset + 9 < fixed.length) {
+                                    numEntries = fixed[eocdOffset+8] | (fixed[eocdOffset+9] << 8);
+                                }
+                                console.log('Number of entries:', numEntries);
+                                
+                                // Fix the CD offset at bytes 16-19 of EOCD
+                                fixed[eocdOffset+16] = cdOffset & 0xff;
+                                fixed[eocdOffset+17] = (cdOffset >> 8) & 0xff;
+                                fixed[eocdOffset+18] = (cdOffset >> 16) & 0xff;
+                                fixed[eocdOffset+19] = (cdOffset >> 24) & 0xff;
+                                
+                                // Fix the CD size at bytes 12-15 of EOCD
+                                fixed[eocdOffset+12] = cdSize & 0xff;
+                                fixed[eocdOffset+13] = (cdSize >> 8) & 0xff;
+                                fixed[eocdOffset+14] = (cdSize >> 16) & 0xff;
+                                fixed[eocdOffset+15] = (cdSize >> 24) & 0xff;
+                                
+                                console.log('Fixed EOCD - CD offset:', cdOffset, 'CD size:', cdSize);
+                                
+                                try {
+                                    zip = await JSZip.loadAsync(fixed);
+                                    console.log('SUCCESS with corrected EOCD!');
+                                    decryptedBytes = fixed;
+                                } catch (e) {
+                                    console.log('Failed with corrected EOCD:', e.message);
+                                }
+                            }
+                        }
+                        
+                        // Strategy 3: If still no zip, look for EOCD and extract clean ZIP
+                        if (!zip) {
+                            console.log('Strategy 2 failed, trying EOCD extraction...');
+                            console.log('Searching for EOCD in range:', Math.max(0, decryptedBytes.length - 65557), 'to', decryptedBytes.length);
+                            
+                            for (let i = decryptedBytes.length - 22; i >= Math.max(0, decryptedBytes.length - 65557); i--) {
+                                if (i + 21 < decryptedBytes.length &&
+                                    decryptedBytes[i] === 0x50 && decryptedBytes[i+1] === 0x4b && 
+                                    decryptedBytes[i+2] === 0x05 && decryptedBytes[i+3] === 0x06) {
+                                    
+                                    console.log('Found EOCD at offset:', i);
+                                    const commentLength = decryptedBytes[i+20] | (decryptedBytes[i+21] << 8);
+                                    const validZipEnd = i + 22 + commentLength;
+                                    console.log('Comment length:', commentLength, 'Valid ZIP end:', validZipEnd);
+                                    
+                                    const validZip = decryptedBytes.slice(0, Math.min(validZipEnd, decryptedBytes.length));
+                                    console.log('Extracting', validZip.length, 'bytes based on EOCD');
+                                    try {
+                                        zip = await JSZip.loadAsync(validZip);
+                                        console.log('SUCCESS with EOCD extraction!');
+                                        break;
+                                    } catch (e) {
+                                        console.log('EOCD extraction failed:', e.message);
+                                    }
+                                    break;
+                                }
+                            }
+                            
+                            // Strategy 4: If still no luck, try brute force search through entire file
+                            if (!zip) {
+                                console.log('Strategy 3 failed, trying brute-force EOCD search through entire file...');
+                                for (let i = decryptedBytes.length - 1; i >= 0; i--) {
+                                    if (decryptedBytes[i] === 0x50 && i + 3 < decryptedBytes.length &&
+                                        decryptedBytes[i+1] === 0x4b && decryptedBytes[i+2] === 0x05 && decryptedBytes[i+3] === 0x06) {
+                                        
+                                        console.log('Found EOCD signature at offset:', i);
+                                        
+                                        let zipToTry = decryptedBytes;
+                                        
+                                        if (i + 21 < decryptedBytes.length) {
+                                            // EOCD is complete
+                                            const commentLength = decryptedBytes[i+20] | (decryptedBytes[i+21] << 8);
+                                            const eocdEnd = i + 22 + commentLength;
+                                            console.log('EOCD offset:', i, 'Comment length:', commentLength, 'Expected end:', eocdEnd);
+                                            
+                                            if (eocdEnd <= decryptedBytes.length) {
+                                                zipToTry = decryptedBytes.slice(0, eocdEnd);
+                                            }
+                                        } else {
+                                            // EOCD is incomplete - pad it
+                                            const missingBytes = 22 - (decryptedBytes.length - i);
+                                            console.log('EOCD is incomplete - missing', missingBytes, 'bytes, padding...');
+                                            const padding = new Uint8Array(missingBytes);
+                                            const padded = new Uint8Array(decryptedBytes.length + missingBytes);
+                                            padded.set(decryptedBytes, 0);
+                                            padded.set(padding, decryptedBytes.length);
+                                            zipToTry = padded;
+                                        }
+                                        
+                                        console.log('Trying ZIP with', zipToTry.length, 'bytes');
+                                        try {
+                                            zip = await JSZip.loadAsync(zipToTry);
+                                            console.log('SUCCESS with brute-force EOCD!');
+                                            break;
+                                        } catch (e) {
+                                            console.log('Failed:', e.message);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!zip) {
+                            throw err;  // Re-throw original error if all strategies failed
+                        }
+                    }
+                    
                     const files = [];
                     
+                    console.log('ZIP object has', Object.keys(zip.files).length, 'entries');
+                    console.log('Files in ZIP:', Object.keys(zip.files));
+                    
                     for (const [filename, zipEntry] of Object.entries(zip.files)) {
+                        console.log('Processing entry:', filename, 'isDir:', zipEntry.dir);
                         if (!zipEntry.dir) {
                             const content = await zipEntry.async('uint8array');
                             files.push({
@@ -404,13 +697,159 @@
                                 size: content.length,
                                 data: content
                             });
+                            console.log('Added file:', filename);
                         }
                     }
                     
+                    console.log('After JSZip extraction, files.length:', files.length);
                     console.log('Extracted files:', files.length);
+                    console.log('About to check fallback...');
                     
                     if (files.length === 0) {
                         throw new Error('ZIP has no files');
+                    }
+                    
+                    // Fallback: if we only got 1 file but the backup should have more,
+                    // try extracting by finding local file headers directly
+                    if (files.length === 1) {
+                        console.log('Fallback triggered: Only found 1 file, searching for additional local file headers...');
+                        const lfhSignature = [0x50, 0x4b, 0x03, 0x04]; // Local File Header
+                        
+                        // Find all LFH positions
+                        const lfhPositions = [];
+                        for (let i = 0; i < decryptedBytes.length - 3; i++) {
+                            if (decryptedBytes[i] === lfhSignature[0] && 
+                                decryptedBytes[i+1] === lfhSignature[1] && 
+                                decryptedBytes[i+2] === lfhSignature[2] && 
+                                decryptedBytes[i+3] === lfhSignature[3]) {
+                                lfhPositions.push(i);
+                            }
+                        }
+                        
+                        console.log('Found', lfhPositions.length, 'local file headers');
+                        
+                        // Try to extract each file from its LFH
+                        for (let idx = 0; idx < lfhPositions.length; idx++) {
+                            const lfhOffset = lfhPositions[idx];
+                            const nextLfhOffset = idx + 1 < lfhPositions.length ? lfhPositions[idx + 1] : decryptedBytes.length;
+                            
+                            try {
+                                // Read LFH to get filename and sizes
+                                if (lfhOffset + 30 > decryptedBytes.length) continue;
+                                
+                                const flags = decryptedBytes[lfhOffset+6] | (decryptedBytes[lfhOffset+7] << 8);
+                                const fileNameLen = decryptedBytes[lfhOffset+26] | (decryptedBytes[lfhOffset+27] << 8);
+                                const extraLen = decryptedBytes[lfhOffset+28] | (decryptedBytes[lfhOffset+29] << 8);
+                                const compressedSize = decryptedBytes[lfhOffset+18] | (decryptedBytes[lfhOffset+19] << 8) | 
+                                                      (decryptedBytes[lfhOffset+20] << 16) | (decryptedBytes[lfhOffset+21] << 24);
+                                const uncompressedSize = decryptedBytes[lfhOffset+22] | (decryptedBytes[lfhOffset+23] << 8) | 
+                                                        (decryptedBytes[lfhOffset+24] << 16) | (decryptedBytes[lfhOffset+25] << 24);
+                                const compressionMethod = decryptedBytes[lfhOffset+8] | (decryptedBytes[lfhOffset+9] << 8);
+                                
+                                if (fileNameLen === 0) continue;
+                                
+                                // Read filename
+                                let fileName = '';
+                                for (let i = 0; i < fileNameLen && lfhOffset + 30 + i < decryptedBytes.length; i++) {
+                                    fileName += String.fromCharCode(decryptedBytes[lfhOffset + 30 + i]);
+                                }
+                                
+                                // Data starts after LFH header, filename, and extra field
+                                const dataStart = lfhOffset + 30 + fileNameLen + extraLen;
+                                
+                                // For files with data descriptor flag (0x08), the sizes in LFH are dummy/zero
+                                // The real sizes are in the descriptor that comes AFTER the file data
+                                // We need to find where the file data ends by looking for the descriptor signature
+                                let dataEnd;
+                                
+                                if (fileName.endsWith('/')) {
+                                    // Directory - no data
+                                    dataEnd = dataStart;
+                                } else if ((flags & 0x08) !== 0) {
+                                    // File has data descriptor - find it by looking for signature 0x504b0708
+                                    // The descriptor format is: [optional signature 4 bytes] + CRC (4) + compSize (4) + uncompSize (4)
+                                    let foundDescriptor = false;
+                                    
+                                    // Search backwards from nextLfhOffset for the descriptor
+                                    for (let i = nextLfhOffset - 16; i >= dataStart; i--) {
+                                        if (decryptedBytes[i] === 0x50 && decryptedBytes[i+1] === 0x4b &&
+                                            decryptedBytes[i+2] === 0x07 && decryptedBytes[i+3] === 0x08) {
+                                            // Found descriptor signature
+                                            dataEnd = i;
+                                            foundDescriptor = true;
+                                            console.log('Found data descriptor for', fileName, 'at offset', i, '- data ends at', dataEnd);
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (!foundDescriptor) {
+                                        // No descriptor found, use nextLfhOffset (shouldn't happen if flags are correct)
+                                        dataEnd = nextLfhOffset;
+                                        console.log('No descriptor found for', fileName, '- using nextLfhOffset:', dataEnd);
+                                    }
+                                } else if (compressedSize > 0) {
+                                    // Use compressed size if available
+                                    dataEnd = Math.min(dataStart + compressedSize, nextLfhOffset);
+                                } else if (uncompressedSize > 0) {
+                                    // Use uncompressed size if available
+                                    dataEnd = Math.min(dataStart + uncompressedSize, nextLfhOffset);
+                                } else {
+                                    // No size info - use everything until next file/structure
+                                    dataEnd = nextLfhOffset;
+                                }
+                                
+                                const fileData = decryptedBytes.slice(dataStart, dataEnd);
+                                
+                                // Log details for files with compression issues
+                                if (compressionMethod === 8) {
+                                    console.log('Extracting:', fileName, '| flags:0x' + flags.toString(16) + ' hasDD:' + ((flags & 0x08) !== 0) + ' method:' + compressionMethod + ' dataStart:' + dataStart + ' dataEnd:' + dataEnd + ' extractedSize:' + fileData.length + ' firstBytes:' + Array.from(fileData.slice(0, 6)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                                }
+                                
+                                
+                                // Decompress if the file is stored with DEFLATE compression (method 8)
+                                let finalData = fileData;
+                                
+                                if (compressionMethod === 8) {
+                                    try {
+                                        if (typeof pako === 'undefined') {
+                                            console.log('pako not available, keeping compressed:', fileName);
+                                        } else {
+                                            // Convert fileData to proper Uint8Array if needed
+                                            const dataToInflate = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
+                                            
+                                            // Method 8 = DEFLATE (raw), not gzip
+                                            // Use inflateRaw for raw DEFLATE streams (no wrapper)
+                                            try {
+                                                finalData = pako.inflateRaw(dataToInflate);
+                                                console.log('✓ Decompressed (raw DEFLATE):', fileName, '| from', dataToInflate.length, 'to', finalData.length, 'bytes');
+                                            } catch (rawErr) {
+                                                console.log('✗ DEFLATE decompression failed for', fileName, ':', rawErr?.message || String(rawErr));
+                                                // Keep original data if decompression fails
+                                            }
+                                        }
+                                    } catch (err) {
+                                        console.log('✗ Decompression error for', fileName, ':', err?.message || String(err));
+                                        // Keep original compressed data if decompression fails
+                                    }
+                                }
+                                
+                                // Check if this file is not already in our list
+                                if (!files.some(f => f.name === fileName)) {
+                                    files.push({
+                                        name: fileName,
+                                        size: finalData.length,
+                                        data: finalData,
+                                        originalCompressionMethod: compressionMethod,
+                                        originalCompressedSize: compressionMethod === 8 ? fileData.length : finalData.length
+                                    });
+                                    if (fileName.endsWith('.gz') || compressionMethod === 8) {
+                                        console.log('Extracted file:', fileName, 'compression method:', compressionMethod, 'final size:', finalData.length);
+                                    }
+                                }
+                            } catch (e) {
+                                console.log('Failed to extract file at offset', lfhOffset, ':', e.message);
+                            }
+                        }
                     }
                     
                     // Look for backup info and databases
@@ -418,7 +857,7 @@
                     let databases = {};
                     
                     for (const f of files) {
-                        console.log('File:', f.name);
+                        console.log('File:', f.name, 'size:', f.size, 'bytes, first 20 bytes:', f.size > 0 ? Array.from(f.data.slice(0, Math.min(20, f.size))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ') : '(empty)');
                         
                         // Look for backup metadata
                         if (f.name.includes('backup_info') || f.name.includes('version')) {
@@ -432,6 +871,41 @@
                         // Store BSON databases
                         if (f.name.endsWith('.bson') || f.name.includes('db')) {
                             databases[f.name] = f;
+                        }
+                    }
+                    
+                    // Post-process .gz files that might have additional gzip compression
+                    // (files may be DEFLATE compressed in ZIP and also gzip compressed)
+                    const filesToProcess = [...files];
+                    for (const f of filesToProcess) {
+                        if (f.name.endsWith('.gz')) {
+                            try {
+                                const dataToCheck = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+                                
+                                // Check if data has gzip magic bytes (0x1f 0x8b)
+                                if (dataToCheck.length >= 2 && dataToCheck[0] === 0x1f && dataToCheck[1] === 0x8b && typeof pako !== 'undefined') {
+                                    try {
+                                        const decompressed = pako.inflate(dataToCheck);
+                                        const baseName = f.name.slice(0, -3); // Remove .gz extension
+                                        
+                                        // Add decompressed version as a separate file
+                                        files.push({
+                                            name: baseName + ' (decompressed)',
+                                            size: decompressed.length,
+                                            data: decompressed,
+                                            isDecompressed: true
+                                        });
+                                        
+                                        console.log('Decompressed:', f.name, '->', baseName, 'size:', decompressed.length);
+                                    } catch (decompressErr) {
+                                        console.log('Failed to decompress', f.name, ':', decompressErr?.message);
+                                    }
+                                } else {
+                                    console.log(f.name, 'is extracted from ZIP and decompressed (no additional gzip header)');
+                                }
+                            } catch (e) {
+                                console.log('Error processing', f.name, ':', e?.message);
+                            }
                         }
                     }
                     
@@ -553,6 +1027,11 @@
                     <label>Files in Backup</label>
                     <value>${files.length}</value>
                 </div>
+                <div class="info-item" style="grid-column: span 2;">
+                    <button class="reset-btn" onclick="downloadZip()" style="width: 100%; background: #667eea; color: white; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
+                        📥 Download Fixed ZIP
+                    </button>
+                </div>
             `;
 
             dataSection.innerHTML = '<h3>📦 Backup Contents</h3>';
@@ -573,11 +1052,22 @@
                 const ext = f.name.split('.').pop();
                 const sizeKB = (f.size / 1024).toFixed(2);
                 const isBSON = f.name.endsWith('.bson');
+                const isDecompressed = f.isDecompressed || f.name.includes('(decompressed)');
+                let badgeClass = 'badge-success';
+                let badgeText = isBSON ? 'BSON' : ext;
+                
+                if (isDecompressed) {
+                    badgeClass = 'badge-warning';
+                    badgeText = '📦 DECOMPRESSED';
+                } else if (isBSON) {
+                    badgeClass = 'badge-info';
+                }
+                
                 tableHTML += `
                     <tr onclick='showFileContent(${JSON.stringify(f.name)})' style="cursor: pointer;">
                         <td><strong>${f.name}</strong></td>
                         <td>${sizeKB} KB</td>
-                        <td><span class="badge ${isBSON ? 'badge-info' : 'badge-success'}">${isBSON ? 'BSON' : ext}</span></td>
+                        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
                     </tr>
                 `;
             });
@@ -592,55 +1082,138 @@
             }
         }
         
+        function generateHexDump(data, maxLines = 50) {
+            let hex = '';
+            const bytesPerLine = 16;
+            const maxBytes = maxLines * bytesPerLine;
+            const displayData = data.length > maxBytes ? data.slice(0, maxBytes) : data;
+            
+            for (let i = 0; i < displayData.length; i += bytesPerLine) {
+                const offset = i.toString(16).padStart(8, '0').toUpperCase();
+                const chunk = displayData.slice(i, i + bytesPerLine);
+                
+                // Hex representation
+                let hexPart = '';
+                let asciiPart = '';
+                for (let j = 0; j < bytesPerLine; j++) {
+                    if (j + i < displayData.length) {
+                        const byte = chunk[j];
+                        hexPart += byte.toString(16).padStart(2, '0').toUpperCase() + ' ';
+                        // ASCII representation
+                        asciiPart += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
+                    } else {
+                        hexPart += '   ';
+                        asciiPart += ' ';
+                    }
+                    // Add extra space in the middle for readability
+                    if (j === 7) hexPart += ' ';
+                }
+                
+                hex += `${offset}  ${hexPart.padEnd(50)} ${asciiPart}\n`;
+            }
+            
+            if (displayData.length < data.length) {
+                hex += `\n[Showing first ${displayData.length} bytes of ${data.length} total bytes]`;
+            }
+            
+            return hex;
+        }
+
         function showFileContent(fileName) {
             const file = window.backupFiles.find(f => f.name === fileName);
             if (!file) return;
             
             let content;
             let isText = false;
+            let displayType = 'text';
             
-            try {
-                content = new TextDecoder().decode(file.data);
-                // Check if it looks like text
-                if (content.includes('\n') || content.match(/^[\w\s\-\.,:{}[\]"']+$/)) {
+            // Check for actual gzip magic bytes
+            const hasGzipMagicBytes = file.data.length >= 2 && file.data[0] === 0x1f && file.data[1] === 0x8b;
+            
+            if (hasGzipMagicBytes && typeof pako !== 'undefined') {
+                try {
+                    const dataToDecompress = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+                    const decompressed = pako.inflate(dataToDecompress);
+                    content = new TextDecoder().decode(decompressed);
                     isText = true;
+                    displayType = 'gzip-text';
+                } catch (e) {
+                    // If gzip decompression fails, show hex dump
+                    console.log('Failed to decompress gzip file:', e);
+                    content = generateHexDump(file.data);
+                    displayType = 'hex';
                 }
-            } catch (e) {
-                // Binary file
-            }
-            
-            if (!isText) {
-                if (file.name.endsWith('.bson')) {
-                    content = 'BSON Database File (Binary)\n\nTo view contents:\n1. Save this file\n2. Run: bsondump file.bson > file.json\n3. Open the .json file\n\n(bsondump is part of MongoDB Tools)';
-                } else if (file.name.endsWith('.png') || file.name.endsWith('.jpg')) {
-                    // Try to create image data URL
-                    const blob = new Blob([file.data], { type: file.name.endsWith('.png') ? 'image/png' : 'image/jpeg' });
-                    const url = URL.createObjectURL(blob);
-                    const modal = document.createElement('div');
-                    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px;';
-                    modal.innerHTML = `
-                        <div style="background: white; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow: auto; padding: 30px; text-align: center;">
-                            <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}</h2>
-                            <img src="${url}" style="max-width: 100%; max-height: 70vh; margin-bottom: 20px;">
-                            <button class="reset-btn" onclick="this.closest('div').parentElement.remove()">Close</button>
-                        </div>
-                    `;
-                    document.body.appendChild(modal);
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) modal.remove();
-                    });
-                    return;
-                } else {
-                    content = 'Binary file (cannot display)';
+            } else if (file.name.endsWith('.gz')) {
+                // .gz file without gzip magic bytes - likely stored raw
+                try {
+                    content = new TextDecoder().decode(file.data);
+                    if (content.includes('\n') || content.match(/^[\w\s\-\.,:{}[\]"']+$/) || file.name.endsWith('.properties')) {
+                        isText = true;
+                        displayType = 'text';
+                    } else {
+                        // Binary data with .gz extension
+                        content = generateHexDump(file.data);
+                        displayType = 'hex';
+                    }
+                } catch (e) {
+                    // Binary file
+                    content = generateHexDump(file.data);
+                    displayType = 'hex';
+                }
+            } else {
+                try {
+                    content = new TextDecoder().decode(file.data);
+                    // Check if it looks like text
+                    if (content.includes('\n') || content.match(/^[\w\s\-\.,:{}[\]"']+$/) || file.name.endsWith('.json') || file.name.endsWith('.properties') || file.name.endsWith('.txt')) {
+                        isText = true;
+                        displayType = 'text';
+                    }
+                } catch (e) {
+                    // Binary file
+                }
+                
+                if (!isText) {
+                    if (file.name.endsWith('.bson')) {
+                        content = 'BSON Database File (Binary)\n\nTo view contents:\n1. Save this file\n2. Run: bsondump file.bson > file.json\n3. Open the .json file\n\n(bsondump is part of MongoDB Tools)';
+                        displayType = 'text';
+                        isText = true;
+                    } else if (file.name.endsWith('.png') || file.name.endsWith('.jpg')) {
+                        // Try to create image data URL
+                        const blob = new Blob([file.data], { type: file.name.endsWith('.png') ? 'image/png' : 'image/jpeg' });
+                        const url = URL.createObjectURL(blob);
+                        const modal = document.createElement('div');
+                        modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px;';
+                        modal.innerHTML = `
+                            <div style="background: white; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow: auto; padding: 30px; text-align: center;">
+                                <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}</h2>
+                                <img src="${url}" style="max-width: 100%; max-height: 70vh; margin-bottom: 20px;">
+                                <button class="reset-btn" onclick="this.closest('div').parentElement.remove()">Close</button>
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+                        modal.addEventListener('click', (e) => {
+                            if (e.target === modal) modal.remove();
+                        });
+                        return;
+                    } else {
+                        // Show hex dump for unknown binary files
+                        content = generateHexDump(file.data);
+                        displayType = 'hex';
+                    }
                 }
             }
             
             const modal = document.createElement('div');
             modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px;';
+            
+            let typeLabel = '';
+            if (displayType === 'gzip-text') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(decompressed from .gz)</span>';
+            else if (displayType === 'hex') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(hex dump - binary file)</span>';
+            
             modal.innerHTML = `
                 <div style="background: white; border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh; overflow: auto; padding: 30px;">
-                    <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}</h2>
-                    <div class="json-viewer"><pre>${escapeHtml(isText ? content.substring(0, 100000) : content)}</pre></div>
+                    <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}${typeLabel}</h2>
+                    <div class="json-viewer"><pre style="font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.4;">${escapeHtml(isText ? content.substring(0, 100000) : content)}</pre></div>
                     <button class="reset-btn" onclick="this.closest('div').parentElement.remove()">Close</button>
                 </div>
             `;
@@ -653,6 +1226,207 @@
         function showError(message) {
             infoSection.classList.add('visible');
             infoSection.innerHTML = `<div class="error">${message}</div><button class="reset-btn" onclick="reset()">Try Again</button>`;
+        }
+
+        function reconstructZip(files) {
+            // Reconstruct a proper ZIP file from extracted files
+            // Filter out decompressed duplicates and invalid entries
+            const validFiles = files.filter(f => !f.isDecompressed && f.data && f.data.length >= 0);
+            
+            const encoder = new TextEncoder();
+            let zipData = [];
+            let centralDirectory = [];
+            let offset = 0;
+
+            validFiles.forEach(file => {
+                // Ensure data is a Uint8Array
+                const fileData = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+                
+                // Local file header
+                const fileName = file.name;
+                const fileNameBytes = encoder.encode(fileName);
+                const fileSize = fileData.length;
+
+                // Local file header signature
+                const lfhSignature = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+                const lfhVersion = new Uint8Array([0x14, 0x00]); // version 2.0
+                const lfhFlags = new Uint8Array([0x00, 0x00]); // general purpose bit flag
+                const lfhCompression = new Uint8Array([0x00, 0x00]); // no compression
+
+                // Simplified times/dates (1980-01-01 00:00:00)
+                const lfhTime = new Uint8Array([0x00, 0x00]);
+                const lfhDate = new Uint8Array([0x21, 0x00]);
+
+                // CRC-32 placeholder
+                const crc32 = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
+
+                // Size fields (little-endian)
+                const compressedSize = new Uint8Array(4);
+                const uncompressedSize = new Uint8Array(4);
+                new DataView(compressedSize.buffer).setUint32(0, fileSize, true);
+                new DataView(uncompressedSize.buffer).setUint32(0, fileSize, true);
+
+                const fileNameLength = new Uint8Array(2);
+                new DataView(fileNameLength.buffer).setUint16(0, fileNameBytes.length, true);
+
+                const extraFieldLength = new Uint8Array(2);
+                new DataView(extraFieldLength.buffer).setUint16(0, 0, true);
+
+                // Build local file header
+                const lfh = new Uint8Array(
+                    lfhSignature.length + lfhVersion.length + lfhFlags.length + 
+                    lfhCompression.length + lfhTime.length + lfhDate.length + 
+                    crc32.length + compressedSize.length + uncompressedSize.length + 
+                    fileNameLength.length + extraFieldLength.length + fileNameBytes.length
+                );
+
+                let pos = 0;
+                lfh.set(lfhSignature, pos); pos += lfhSignature.length;
+                lfh.set(lfhVersion, pos); pos += lfhVersion.length;
+                lfh.set(lfhFlags, pos); pos += lfhFlags.length;
+                lfh.set(lfhCompression, pos); pos += lfhCompression.length;
+                lfh.set(lfhTime, pos); pos += lfhTime.length;
+                lfh.set(lfhDate, pos); pos += lfhDate.length;
+                lfh.set(crc32, pos); pos += crc32.length;
+                lfh.set(compressedSize, pos); pos += compressedSize.length;
+                lfh.set(uncompressedSize, pos); pos += uncompressedSize.length;
+                lfh.set(fileNameLength, pos); pos += fileNameLength.length;
+                lfh.set(extraFieldLength, pos); pos += extraFieldLength.length;
+                lfh.set(fileNameBytes, pos);
+
+                zipData.push(lfh);
+                zipData.push(fileData);
+
+                // Build central directory record
+                const cdfhSignature = new Uint8Array([0x50, 0x4b, 0x01, 0x02]);
+                const cdfhVersionMade = new Uint8Array([0x14, 0x00]); // Unix, version 2.0
+                const cdfhVersionNeeded = new Uint8Array([0x14, 0x00]);
+                const cdfhFlags = new Uint8Array([0x00, 0x00]);
+                const cdfhCompression = new Uint8Array([0x00, 0x00]);
+
+                const offsetBytes = new Uint8Array(4);
+                new DataView(offsetBytes.buffer).setUint32(0, offset, true);
+
+                const externalAttrs = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
+
+                const cdfh = new Uint8Array(
+                    cdfhSignature.length + cdfhVersionMade.length + cdfhVersionNeeded.length +
+                    cdfhFlags.length + cdfhCompression.length + lfhTime.length + lfhDate.length +
+                    crc32.length + compressedSize.length + uncompressedSize.length +
+                    fileNameLength.length + extraFieldLength.length + 
+                    new Uint8Array(2).length + new Uint8Array(2).length + externalAttrs.length + 
+                    offsetBytes.length + fileNameBytes.length
+                );
+
+                pos = 0;
+                cdfh.set(cdfhSignature, pos); pos += cdfhSignature.length;
+                cdfh.set(cdfhVersionMade, pos); pos += cdfhVersionMade.length;
+                cdfh.set(cdfhVersionNeeded, pos); pos += cdfhVersionNeeded.length;
+                cdfh.set(cdfhFlags, pos); pos += cdfhFlags.length;
+                cdfh.set(cdfhCompression, pos); pos += cdfhCompression.length;
+                cdfh.set(lfhTime, pos); pos += lfhTime.length;
+                cdfh.set(lfhDate, pos); pos += lfhDate.length;
+                cdfh.set(crc32, pos); pos += crc32.length;
+                cdfh.set(compressedSize, pos); pos += compressedSize.length;
+                cdfh.set(uncompressedSize, pos); pos += uncompressedSize.length;
+                cdfh.set(fileNameLength, pos); pos += fileNameLength.length;
+                cdfh.set(extraFieldLength, pos); pos += extraFieldLength.length;
+
+                // File comment length
+                const commentLength = new Uint8Array(2);
+                cdfh.set(commentLength, pos); pos += 2;
+
+                // Disk number start
+                const diskStart = new Uint8Array(2);
+                cdfh.set(diskStart, pos); pos += 2;
+
+                // Internal/external attributes
+                const internalAttrs = new Uint8Array(2);
+                cdfh.set(internalAttrs, pos); pos += 2;
+                cdfh.set(externalAttrs, pos); pos += externalAttrs.length;
+
+                // Offset of local file header
+                cdfh.set(offsetBytes, pos); pos += offsetBytes.length;
+                cdfh.set(fileNameBytes, pos);
+
+                centralDirectory.push(cdfh);
+
+                // Update offset for next file
+                offset += lfh.length + fileSize;
+            });
+
+            // Merge all central directory records
+            let cdSize = 0;
+            centralDirectory.forEach(cdfh => cdSize += cdfh.length);
+
+            // Build End of Central Directory record
+            const eocdSignature = new Uint8Array([0x50, 0x4b, 0x05, 0x06]);
+            const diskNumber = new Uint8Array([0x00, 0x00]);
+            const diskWithCD = new Uint8Array([0x00, 0x00]);
+            const cdRecordCount = new Uint8Array(2);
+            new DataView(cdRecordCount.buffer).setUint16(0, validFiles.length, true);
+
+            const totalCDRecords = new Uint8Array(2);
+            new DataView(totalCDRecords.buffer).setUint16(0, validFiles.length, true);
+
+            const cdSizeBytes = new Uint8Array(4);
+            new DataView(cdSizeBytes.buffer).setUint32(0, cdSize, true);
+
+            const cdOffsetBytes = new Uint8Array(4);
+            new DataView(cdOffsetBytes.buffer).setUint32(0, offset, true);
+
+            const commentLength = new Uint8Array(2);
+            const comment = new Uint8Array(0);
+
+            const eocd = new Uint8Array(
+                eocdSignature.length + diskNumber.length + diskWithCD.length +
+                cdRecordCount.length + totalCDRecords.length + cdSizeBytes.length +
+                cdOffsetBytes.length + commentLength.length + comment.length
+            );
+
+            pos = 0;
+            eocd.set(eocdSignature, pos); pos += eocdSignature.length;
+            eocd.set(diskNumber, pos); pos += diskNumber.length;
+            eocd.set(diskWithCD, pos); pos += diskWithCD.length;
+            eocd.set(cdRecordCount, pos); pos += cdRecordCount.length;
+            eocd.set(totalCDRecords, pos); pos += totalCDRecords.length;
+            eocd.set(cdSizeBytes, pos); pos += cdSizeBytes.length;
+            eocd.set(cdOffsetBytes, pos); pos += cdOffsetBytes.length;
+            eocd.set(commentLength, pos); pos += commentLength.length;
+            eocd.set(comment, pos);
+
+            // Combine all parts
+            zipData.push(...centralDirectory);
+            zipData.push(eocd);
+
+            // Create final ZIP file
+            const totalSize = zipData.reduce((sum, part) => sum + part.length, 0);
+            const finalZip = new Uint8Array(totalSize);
+            let finalPos = 0;
+            zipData.forEach(part => {
+                finalZip.set(part, finalPos);
+                finalPos += part.length;
+            });
+
+            return finalZip;
+        }
+
+        function downloadZip() {
+            if (!window.backupFiles || window.backupFiles.length === 0) {
+                alert('No backup files to download');
+                return;
+            }
+
+            const zipData = reconstructZip(window.backupFiles);
+            const blob = new Blob([zipData], { type: 'application/zip' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'backup.zip';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function reset() {
