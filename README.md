@@ -122,7 +122,6 @@ Tested on:
 ## Files
 
 - `backup-explorer.html` - Main tool (single HTML file with embedded CSS and JavaScript)
-- `test-decrypt.html` - Simple decryption test page
 - `README.md` - This file
 
 ## Troubleshooting
