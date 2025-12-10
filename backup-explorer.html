@@ -1228,10 +1228,56 @@
             infoSection.innerHTML = `<div class="error">${message}</div><button class="reset-btn" onclick="reset()">Try Again</button>`;
         }
 
+        // CRC-32 calculation function
+        function calculateCRC32(data) {
+            const table = [];
+            for (let i = 0; i < 256; i++) {
+                let crc = i;
+                for (let j = 0; j < 8; j++) {
+                    crc = (crc & 1) ? (0xEDB88320 ^ (crc >>> 1)) : (crc >>> 1);
+                }
+                table[i] = crc;
+            }
+            
+            let crc = 0xFFFFFFFF;
+            for (let i = 0; i < data.length; i++) {
+                crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+            }
+            return (crc ^ 0xFFFFFFFF) >>> 0;
+        }
+
         function reconstructZip(files) {
             // Reconstruct a proper ZIP file from extracted files
-            // Filter out decompressed duplicates and invalid entries
-            const validFiles = files.filter(f => !f.isDecompressed && f.data && f.data.length >= 0);
+            
+            // Build a list of files that have been decompressed
+            const decompressedBaseNames = new Set();
+            files.forEach(f => {
+                if (f.isDecompressed && f.name.endsWith(' (decompressed)')) {
+                    // Extract base name (e.g., "db (decompressed)" -> "db")
+                    const baseName = f.name.slice(0, -15); // Remove " (decompressed)"
+                    decompressedBaseNames.add(baseName + '.gz');
+                }
+            });
+            
+            // Filter: include decompressed versions, exclude .gz files that were decompressed
+            const validFiles = files.filter(f => {
+                if (!f.data || f.data.length === undefined) return false;
+                
+                // If this is a decompressed version, include it
+                if (f.isDecompressed) return true;
+                
+                // If this is a .gz file that has a decompressed version, exclude it
+                if (f.name.endsWith('.gz') && decompressedBaseNames.has(f.name)) return false;
+                
+                // Otherwise include it
+                return true;
+            });
+            
+            console.log('reconstructZip: Total files:', files.length, 'Valid files:', validFiles.length);
+            validFiles.forEach(f => {
+                const dataLen = f.data ? (f.data.length || f.data.byteLength || 0) : 0;
+                console.log('  - File:', f.name, 'data length:', dataLen, 'isUint8Array:', f.data instanceof Uint8Array);
+            });
             
             const encoder = new TextEncoder();
             let zipData = [];
@@ -1240,10 +1286,33 @@
 
             validFiles.forEach(file => {
                 // Ensure data is a Uint8Array
-                const fileData = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+                let fileData;
+                if (file.data instanceof Uint8Array) {
+                    fileData = file.data;
+                } else if (Array.isArray(file.data)) {
+                    fileData = new Uint8Array(file.data);
+                } else if (file.data.buffer) {
+                    fileData = new Uint8Array(file.data.buffer);
+                } else {
+                    console.error('Cannot convert file data to Uint8Array:', file.name, typeof file.data);
+                    return; // Skip this file
+                }
+                
+                if (!fileData || fileData.length === 0) {
+                    console.warn('Skipping file with no data:', file.name);
+                    return;
+                }
+                
+                console.log('Processing file:', file.name, 'size:', fileData.length);
                 
                 // Local file header
-                const fileName = file.name;
+                let fileName = file.name;
+                
+                // If this is a decompressed file, remove the " (decompressed)" suffix
+                if (file.isDecompressed && fileName.endsWith(' (decompressed)')) {
+                    fileName = fileName.slice(0, -15); // Remove " (decompressed)"
+                }
+                
                 const fileNameBytes = encoder.encode(fileName);
                 const fileSize = fileData.length;
 
@@ -1257,8 +1326,10 @@
                 const lfhTime = new Uint8Array([0x00, 0x00]);
                 const lfhDate = new Uint8Array([0x21, 0x00]);
 
-                // CRC-32 placeholder
-                const crc32 = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
+                // Calculate CRC-32
+                const crc32Value = calculateCRC32(fileData);
+                const crc32 = new Uint8Array(4);
+                new DataView(crc32.buffer).setUint32(0, crc32Value, true);
 
                 // Size fields (little-endian)
                 const compressedSize = new Uint8Array(4);
@@ -1309,14 +1380,18 @@
 
                 const externalAttrs = new Uint8Array([0x00, 0x00, 0x00, 0x00]);
 
-                const cdfh = new Uint8Array(
-                    cdfhSignature.length + cdfhVersionMade.length + cdfhVersionNeeded.length +
-                    cdfhFlags.length + cdfhCompression.length + lfhTime.length + lfhDate.length +
-                    crc32.length + compressedSize.length + uncompressedSize.length +
-                    fileNameLength.length + extraFieldLength.length + 
-                    new Uint8Array(2).length + new Uint8Array(2).length + externalAttrs.length + 
-                    offsetBytes.length + fileNameBytes.length
-                );
+                // File comment length (2 bytes)
+                const fileCommentLength = new Uint8Array(2);
+                
+                // Disk number start (2 bytes)
+                const diskStart = new Uint8Array(2);
+                
+                // Internal/external attributes (2 + 4 bytes)
+                const internalAttrs = new Uint8Array(2);
+
+                // Calculate total size: 46 bytes fixed + fileName length
+                const cdfhSize = 46 + fileNameBytes.length;
+                const cdfh = new Uint8Array(cdfhSize);
 
                 pos = 0;
                 cdfh.set(cdfhSignature, pos); pos += cdfhSignature.length;
@@ -1331,21 +1406,10 @@
                 cdfh.set(uncompressedSize, pos); pos += uncompressedSize.length;
                 cdfh.set(fileNameLength, pos); pos += fileNameLength.length;
                 cdfh.set(extraFieldLength, pos); pos += extraFieldLength.length;
-
-                // File comment length
-                const commentLength = new Uint8Array(2);
-                cdfh.set(commentLength, pos); pos += 2;
-
-                // Disk number start
-                const diskStart = new Uint8Array(2);
-                cdfh.set(diskStart, pos); pos += 2;
-
-                // Internal/external attributes
-                const internalAttrs = new Uint8Array(2);
-                cdfh.set(internalAttrs, pos); pos += 2;
+                cdfh.set(fileCommentLength, pos); pos += fileCommentLength.length;
+                cdfh.set(diskStart, pos); pos += diskStart.length;
+                cdfh.set(internalAttrs, pos); pos += internalAttrs.length;
                 cdfh.set(externalAttrs, pos); pos += externalAttrs.length;
-
-                // Offset of local file header
                 cdfh.set(offsetBytes, pos); pos += offsetBytes.length;
                 cdfh.set(fileNameBytes, pos);
 
@@ -1401,9 +1465,15 @@
 
             // Create final ZIP file
             const totalSize = zipData.reduce((sum, part) => sum + part.length, 0);
+            console.log('Total ZIP size:', totalSize, 'parts:', zipData.length);
             const finalZip = new Uint8Array(totalSize);
             let finalPos = 0;
-            zipData.forEach(part => {
+            zipData.forEach((part, idx) => {
+                console.log('  Setting part', idx, 'at position', finalPos, 'length', part.length, 'remaining space', totalSize - finalPos);
+                if (finalPos + part.length > totalSize) {
+                    console.error('ERROR: Part would exceed buffer! finalPos:', finalPos, 'part.length:', part.length, 'totalSize:', totalSize);
+                    return;
+                }
                 finalZip.set(part, finalPos);
                 finalPos += part.length;
             });
