@@ -1,0 +1,38 @@
+# Environment
+.venv/
+venv/
+env/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Build/Runtime
+node_modules/
+dist/
+build/
+
+# Backup files
+*.unf
+*.bak
+*.zip
+decrypted_backup.*
+test_decrypt.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Logs
+*.log
