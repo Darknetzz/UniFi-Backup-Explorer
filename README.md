@@ -96,7 +96,7 @@ openssl enc -d -in backup.unf -out backup.zip -aes-128-cbc \
 - **CryptoJS 4.2.0** - AES-128-CBC decryption
 - **JSZip 3.10.1** - ZIP file parsing and extraction
 - **pako 2.1.0** - DEFLATE and gzip decompression
-- **BSON 6.2.0** - BSON to JSON conversion
+- **BSON 7.0.0** - BSON to JSON conversion
 - **js-bzip2 1.3.8** - Bzip2 decompression support
 
 ## Privacy & Security
