@@ -6,9 +6,12 @@ A pure **clientside JavaScript** tool to decrypt and explore UniFi network backu
 
 ✅ **No server required** - Everything runs in your browser  
 ✅ **Secure decryption** - Uses AES-128-CBC with hardcoded UniFi keys  
-✅ **File extraction** - Explores ZIP archive contents  
+✅ **File extraction** - Explores ZIP archive contents with proper data descriptor handling  
+✅ **Automatic decompression** - Handles DEFLATE and gzip compression  
+✅ **BSON to JSON conversion** - View database contents as readable JSON  
 ✅ **Metadata display** - Shows backup file info  
-✅ **File preview** - View text, JSON, images, and BSON database info  
+✅ **File preview** - View text, JSON, images, and converted BSON data  
+✅ **Download fixed ZIP** - Export decrypted and decompressed backup files  
 
 ## How It Works
 
@@ -22,9 +25,11 @@ UniFi backup files (.unf) are encrypted using AES-128-CBC with a static key and 
 The tool:
 1. Reads the encrypted .unf file
 2. Decrypts using AES-128-CBC (CryptoJS library)
-3. Extracts files from the resulting ZIP
-4. Displays file list and metadata
-5. Allows preview of file contents
+3. Repairs ZIP structure if needed (handles data descriptors and malformed EOCD)
+4. Extracts files with DEFLATE decompression
+5. Decompresses gzip files and converts BSON to JSON
+6. Displays file list and metadata with interactive preview
+7. Allows downloading a fixed ZIP with all decompressed files
 
 ## Supported Backup Versions
 
@@ -51,11 +56,14 @@ UniFi backups typically contain:
 1. Open `backup-explorer.html` in a modern web browser
 2. Click the drop zone or select a `.unf` backup file
 3. Wait for decryption and extraction
-4. Click file names to preview contents
+4. Browse files and click to preview contents (BSON files automatically converted to JSON)
+5. Click "📥 Download Fixed ZIP" to export all decrypted and decompressed files
 
 ### Database Files (BSON)
 
-UniFi uses MongoDB with BSON-encoded databases. To convert BSON to JSON:
+The tool automatically converts BSON database files to JSON for viewing in the browser. The downloaded ZIP contains the raw BSON files for use with MongoDB tools.
+
+If you need to work with the BSON files directly:
 
 ```bash
 # Install MongoDB tools (if not already installed)
@@ -63,10 +71,8 @@ sudo apt install mongodb-database-tools  # Linux
 brew install mongodb-database-tools      # macOS
 
 # Convert BSON database to JSON
-bsondump db.gz > backup.json
+bsondump db > backup.json
 ```
-
-Or use an online BSON to JSON converter.
 
 ## Technical Details
 
@@ -89,6 +95,9 @@ openssl enc -d -in backup.unf -out backup.zip -aes-128-cbc \
 
 - **CryptoJS 4.2.0** - AES-128-CBC decryption
 - **JSZip 3.10.1** - ZIP file parsing and extraction
+- **pako 2.1.0** - DEFLATE and gzip decompression
+- **BSON 6.2.0** - BSON to JSON conversion
+- **js-bzip2 1.3.8** - Bzip2 decompression support
 
 ## Privacy & Security
 
@@ -127,16 +136,23 @@ The decryption uses static keys from UniFi source code. If decryption fails:
 
 ### "ZIP has structural issues"
 
-Some UniFi backup versions have slightly malformed ZIP end-of-central-directory records. JSZip usually handles this gracefully. If files don't show:
-1. Try decrypting with OpenSSL instead (see command above)
-2. File might be corrupted
+The tool automatically handles:
+- Malformed ZIP end-of-central-directory (EOCD) records
+- Data descriptors in local file headers
+- DEFLATE-compressed files within the ZIP
+- Missing central directory entries
+
+If files still don't show:
+1. Check the browser console (F12) for detailed error messages
+2. The file might be severely corrupted
+3. Try with a different backup file
 
 ### Cannot view BSON files
 
-BSON files are binary MongoDB databases. Convert them using:
-- `bsondump` (from MongoDB tools)
-- Online BSON converters
-- `mongodump` (if you have MongoDB running)
+The tool automatically converts BSON to JSON for viewing in the browser. If this fails:
+1. Download the ZIP and use MongoDB tools: `bsondump db > backup.json`
+2. Check the browser console for BSON parsing errors
+3. The BSON file might be corrupted or in an unexpected format
 
 ## References
 
@@ -150,6 +166,16 @@ BSON files are binary MongoDB databases. Convert them using:
 This tool is provided as-is for exploring your own UniFi backups. Respect copyright and only decrypt backups you have permission to access.
 
 ## Version History
+
+### v2.0 (Current Release)
+- Added BSON to JSON conversion in browser
+- Automatic DEFLATE decompression for ZIP-compressed files
+- Gzip decompression with proper magic byte detection
+- Data descriptor handling for ZIP files
+- Download fixed ZIP with all decompressed files
+- CRC-32 validation for reconstructed ZIPs
+- Enhanced file preview with hex dumps
+- Improved error handling and logging
 
 ### v1.0 (Initial Release)
 - Static AES-128-CBC decryption

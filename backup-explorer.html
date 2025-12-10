@@ -313,9 +313,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/js-bzip2/1.3.8/bzip2.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bson/6.2.0/bson.browser.umd.min.js"></script>
     <script>
         console.log('pako library loaded:', typeof pako !== 'undefined' ? 'YES' : 'NO');
         if (typeof pako !== 'undefined') console.log('pako.inflate available:', typeof pako.inflate);
+        console.log('bson library loaded:', typeof BSON !== 'undefined' ? 'YES' : 'NO');
         
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
@@ -1136,12 +1138,71 @@
                     const decompressed = pako.inflate(dataToDecompress);
                     
                     // Check if decompressed data is BSON
-                    if (decompressed.length > 4) {
+                    if (decompressed.length > 4 && typeof BSON !== 'undefined') {
+                        try {
+                            // Try to parse as BSON
+                            const bsonData = [];
+                            let offset = 0;
+                            let parseError = false;
+                            
+                            // BSON files can contain multiple documents
+                            while (offset < decompressed.length - 4) {
+                                try {
+                                    // Read document size (first 4 bytes, little-endian)
+                                    const docSize = decompressed[offset] | 
+                                                  (decompressed[offset + 1] << 8) | 
+                                                  (decompressed[offset + 2] << 16) | 
+                                                  (decompressed[offset + 3] << 24);
+                                    
+                                    if (docSize <= 0 || docSize > decompressed.length - offset) break;
+                                    
+                                    const docBytes = decompressed.slice(offset, offset + docSize);
+                                    const doc = BSON.deserialize(docBytes);
+                                    bsonData.push(doc);
+                                    offset += docSize;
+                                } catch (e) {
+                                    console.log('Error parsing BSON document at offset', offset, ':', e.message);
+                                    parseError = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (bsonData.length > 0) {
+                                content = JSON.stringify(bsonData, null, 2);
+                                isText = true;
+                                displayType = 'bson-json';
+                            } else {
+                                throw new Error('No BSON documents parsed');
+                            }
+                        } catch (bsonError) {
+                            console.log('BSON parsing failed:', bsonError.message);
+                            // Fall back to showing info about the BSON file
+                            const hasSelectCollection = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length))).includes('selectcollection');
+                            
+                            if (hasSelectCollection) {
+                                content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
+                                         `This file contains MongoDB BSON data with database collections.\n` +
+                                         `BSON parsing library is available but failed to parse the data.\n\n` +
+                                         `To view the full contents:\n` +
+                                         `1. Download the ZIP file\n` +
+                                         `2. Extract the file (it will be named without .gz extension)\n` +
+                                         `3. Use MongoDB tools: bsondump ${file.name.replace('.gz', '')} > output.json\n\n` +
+                                         `Preview of raw data:\n` +
+                                         generateHexDump(decompressed.slice(0, 512));
+                                displayType = 'bson';
+                                isText = true;
+                            } else {
+                                content = new TextDecoder().decode(decompressed);
+                                isText = true;
+                                displayType = 'gzip-text';
+                            }
+                        }
+                    } else {
                         const firstBytes = Array.from(decompressed.slice(0, 20));
                         const hasSelectCollection = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length))).includes('selectcollection');
                         
                         if (hasSelectCollection || (firstBytes.some(b => b < 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09))) {
-                            // This is BSON data
+                            // This is BSON data but library not available
                             content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
                                      `This file contains MongoDB BSON data with database collections.\n\n` +
                                      `To view the full contents:\n` +
@@ -1157,10 +1218,6 @@
                             isText = true;
                             displayType = 'gzip-text';
                         }
-                    } else {
-                        content = new TextDecoder().decode(decompressed);
-                        isText = true;
-                        displayType = 'gzip-text';
                     }
                 } catch (e) {
                     // If gzip decompression fails, show hex dump
@@ -1233,6 +1290,7 @@
             
             let typeLabel = '';
             if (displayType === 'gzip-text') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(decompressed from .gz)</span>';
+            else if (displayType === 'bson-json') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(BSON converted to JSON)</span>';
             else if (displayType === 'bson') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(BSON database file)</span>';
             else if (displayType === 'hex') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(hex dump - binary file)</span>';
             
