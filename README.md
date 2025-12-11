@@ -2,6 +2,9 @@
 
 A pure **clientside JavaScript** tool to decrypt and explore UniFi network backup files (.unf) in your browser.
 
+<img width="1681" height="816" alt="oGkPfHTtUS" src="https://github.com/user-attachments/assets/d580b3a2-a351-473d-9630-113fe4b3c6fc" />
+
+
 ## Features
 
 ✅ **No server required** - Everything runs in your browser  
