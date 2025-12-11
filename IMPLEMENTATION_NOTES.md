@@ -12,11 +12,11 @@ Initially, the backup explorer was using incorrect assumptions about UniFi encry
 
 Through research of the official UniFi backup decrypt project (GitHub: zhangyoufu/unifi-backup-decrypt), discovered that UniFi uses **static encryption credentials**:
 
-✅ **Static AES-128-CBC encryption** (NOT derived)
-✅ **Key**: `bcyangkmluohmars` (16 bytes)
-✅ **IV**: `ubntenterpriseap` (16 bytes)
-✅ **Mode**: CBC with NoPadding
-✅ **Result**: ZIP archive of backup data
+- ✅ **Static AES-128-CBC encryption** (NOT derived)
+- ✅ **Key**: `bcyangkmluohmars` (16 bytes)
+- ✅ **IV**: `ubntenterpriseap` (16 bytes)
+- ✅ **Mode**: CBC with NoPadding
+- ✅ **Result**: ZIP archive of backup data
 
 ## Key Technical Changes
 
@@ -124,11 +124,11 @@ Tested CDNs:
 
 ## Future Enhancements (Optional)
 
-- Add gzip decompression for db.gz files (bzip2 library already included)
-- BSON parser for in-browser preview
-- Export extracted files as ZIP download
-- Backup comparison tool
-- Network configuration preview
+- [x] Add gzip decompression for db.gz files (bzip2 library already included)
+- [x] BSON parser for in-browser preview
+- [x] Export extracted files as ZIP download
+- [ ] Backup comparison tool
+- [ ] Network configuration preview
 
 ## References
 
