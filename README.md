@@ -169,7 +169,13 @@ This tool is provided as-is for exploring your own UniFi backups. Respect copyri
 
 ## Version History
 
-### v2.0 (Current Release)
+### v2.0.1 (Current Release)
+- Maximum call stack size exceeded fix
+    - Replaced the String.fromCharCode.apply(null, data) conversion with a safe Uint8Array→WordArray helper
+    - Added uint8ArrayToWordArray to build CryptoJS WordArrays without apply
+- Enhance file input styling and functionality
+
+### v2.0.0 (Initial Release)
 - Added BSON to JSON conversion in browser
 - Automatic DEFLATE decompression for ZIP-compressed files
 - Gzip decompression with proper magic byte detection
@@ -179,7 +185,7 @@ This tool is provided as-is for exploring your own UniFi backups. Respect copyri
 - Enhanced file preview with hex dumps
 - Improved error handling and logging
 
-### v1.0 (Initial Release)
+### v1.0 (Pre-release)
 - Static AES-128-CBC decryption
 - ZIP extraction and file listing
 - File preview for text and images
