@@ -281,7 +281,7 @@
     <div class="container">
         <div class="header">
             <h1>🔐 UniFi Backup Explorer</h1>
-            <p>Decode and explore .unf backup files locally in your browser</p>
+            <p>Decode and explore .unf and .unifi backup files locally in your browser</p>
         </div>
         
         <div class="upload-section">
@@ -289,10 +289,10 @@
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
-                <p>Drop your <strong>.unf</strong> backup file here</p>
+                <p>Drop your <strong>.unf</strong> or <strong>.unifi</strong> backup file here</p>
                 <span>or click to browse</span>
             </div>
-            <input type="file" id="fileInput" class="file-input" accept=".unf">
+            <input type="file" id="fileInput" class="file-input" accept=".unf,.unifi">
         </div>
         
         <div class="info-section" id="infoSection">
@@ -649,8 +649,11 @@
         });
 
         async function handleFile(file) {
-            if (!file.name.endsWith('.unf')) {
-                showError('Please select a .unf backup file');
+            const nameLower = file.name.toLowerCase();
+            const isUnf = nameLower.endsWith('.unf');
+            const isUnifi = nameLower.endsWith('.unifi');
+            if (!isUnf && !isUnifi) {
+                showError('Please select a .unf or .unifi backup file');
                 return;
             }
 
@@ -660,6 +663,7 @@
 
             document.querySelector('.upload-section').style.display = 'none';
             loadingDiv.style.display = 'block';
+            window._backupType = isUnifi ? 'unifi' : 'unf';
 
             try {
                 const arrayBuffer = await file.arrayBuffer();
@@ -667,6 +671,12 @@
                 
                 console.log('File size:', data.length);
                 console.log('First 20 bytes:', Array.from(data.slice(0, 20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+
+                if (isUnifi) {
+                    const files = decryptAndExtractUnifi(data);
+                    processExtractedFiles(file, files);
+                    return;
+                }
                 
                 // UniFi uses static AES-128-CBC encryption (hardcoded in UniFi software)
                 // Key and IV are NOT derived - they are static values
@@ -1153,64 +1163,7 @@
                         }
                     }
                     
-                    // Look for backup info and databases
-                    let backupInfo = null;
-                    let databases = {};
-                    
-                    for (const f of files) {
-                        console.log('File:', f.name, 'size:', f.size, 'bytes, first 20 bytes:', f.size > 0 ? Array.from(f.data.slice(0, Math.min(20, f.size))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ') : '(empty)');
-                        
-                        // Look for backup metadata
-                        if (f.name.includes('backup_info') || f.name.includes('version')) {
-                            try {
-                                const text = new TextDecoder().decode(f.data);
-                                console.log('Metadata content:', text.slice(0, 200));
-                                backupInfo = text;
-                            } catch (e) { }
-                        }
-                        
-                        // Store BSON databases
-                        if (f.name.endsWith('.bson') || f.name.includes('db')) {
-                            databases[f.name] = f;
-                        }
-                    }
-                    
-                    // Post-process .gz files that might have additional gzip compression
-                    // (files may be DEFLATE compressed in ZIP and also gzip compressed)
-                    const filesToProcess = [...files];
-                    for (const f of filesToProcess) {
-                        if (f.name.endsWith('.gz')) {
-                            try {
-                                const dataToCheck = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
-                                
-                                // Check if data has gzip magic bytes (0x1f 0x8b)
-                                if (dataToCheck.length >= 2 && dataToCheck[0] === 0x1f && dataToCheck[1] === 0x8b && typeof pako !== 'undefined') {
-                                    try {
-                                        const decompressed = pako.inflate(dataToCheck);
-                                        const baseName = f.name.slice(0, -3); // Remove .gz extension
-                                        
-                                        // Add decompressed version as a separate file
-                                        files.push({
-                                            name: baseName + ' (decompressed)',
-                                            size: decompressed.length,
-                                            data: decompressed,
-                                            isDecompressed: true
-                                        });
-                                        
-                                        console.log('Decompressed:', f.name, '->', baseName, 'size:', decompressed.length);
-                                    } catch (decompressErr) {
-                                        console.log('Failed to decompress', f.name, ':', decompressErr?.message);
-                                    }
-                                } else {
-                                    console.log(f.name, 'is extracted from ZIP and decompressed (no additional gzip header)');
-                                }
-                            } catch (e) {
-                                console.log('Error processing', f.name, ':', e?.message);
-                            }
-                        }
-                    }
-                    
-                    displayBackupContents(file, files, backupInfo, databases);
+                    processExtractedFiles(file, files);
                     
                 } catch (e) {
                     throw new Error('Failed to parse decrypted ZIP: ' + e.message);
@@ -1222,6 +1175,133 @@
                 loadingDiv.style.display = 'none';
                 document.querySelector('.upload-section').style.display = 'block';
             }
+        }
+
+        function gunzipIgnoreTrailingPadding(data) {
+            const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+            const tryInflate = (buf) => {
+                try {
+                    const result = pako.inflate(buf);
+                    if (result && result.length > 0) {
+                        return result instanceof Uint8Array ? result : new Uint8Array(result);
+                    }
+                } catch (_) { /* invalid length or trailing junk */ }
+                return null;
+            };
+
+            const direct = tryInflate(bytes);
+            if (direct) return direct;
+
+            // AES-CBC NoPadding aligns plaintext to 16 bytes; strip up to one block of
+            // trailing padding so pako sees a single complete gzip member.
+            for (let trim = 1; trim <= 15; trim++) {
+                if (bytes.length - trim < 18) break;
+                const result = tryInflate(bytes.slice(0, bytes.length - trim));
+                if (result) return result;
+            }
+
+            throw new Error('Failed to gunzip .unifi payload (trailing padding?)');
+        }
+
+        function decryptAndExtractUnifi(data) {
+            // UniFi OS .unifi: AES-256-CBC, IV = first 16 bytes, static 32-byte key
+            const key = CryptoJS.enc.Hex.parse('e383b7c53698b36d4baea4ed22181ef73676bfd5d5b90005d9845ffd5dce985f');
+            const ivBytes = data.slice(0, 16);
+            let cipherBytes = data.slice(16);
+            const rem = cipherBytes.length % 16;
+            if (rem !== 0) {
+                cipherBytes = cipherBytes.slice(0, cipherBytes.length - rem);
+            }
+
+            console.log('Decrypting .unifi with static AES-256-CBC key and file IV...');
+            const iv = uint8ArrayToWordArray(ivBytes);
+            const ciphertext = uint8ArrayToWordArray(cipherBytes);
+            const decrypted = CryptoJS.AES.decrypt(
+                { ciphertext: ciphertext },
+                key,
+                {
+                    iv: iv,
+                    mode: CryptoJS.mode.CBC,
+                    padding: CryptoJS.pad.NoPadding
+                }
+            );
+            const decryptedBytes = wordArrayToUint8Array(decrypted);
+
+            console.log('Decrypted size:', decryptedBytes.length);
+            console.log('Decrypted first 20 bytes:', Array.from(decryptedBytes.slice(0, 20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+
+            if (decryptedBytes.length < 2 || decryptedBytes[0] !== 0x1f || decryptedBytes[1] !== 0x8b) {
+                throw new Error('Decrypted .unifi data is not gzip. Decryption may have failed.');
+            }
+
+            if (typeof pako === 'undefined') {
+                throw new Error('pako library required to decompress .unifi gzip payload');
+            }
+
+            // Gunzip may need to strip up to one AES block of trailing NoPadding bytes.
+            const tarBytes = gunzipIgnoreTrailingPadding(decryptedBytes);
+            console.log('SUCCESS: gunzipped .unifi payload, tar size:', tarBytes.length);
+            const files = parseTar(tarBytes);
+            if (files.length === 0) {
+                throw new Error('TAR archive is empty after decrypting .unifi');
+            }
+            console.log('Extracted', files.length, 'files from tar');
+            return files;
+        }
+
+        function processExtractedFiles(file, files) {
+            let backupInfo = null;
+            let databases = {};
+
+            for (const f of files) {
+                console.log('File:', f.name, 'size:', f.size, 'bytes, first 20 bytes:', f.size > 0 ? Array.from(f.data.slice(0, Math.min(20, f.size))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ') : '(empty)');
+
+                if (f.name.includes('backup_info') || f.name.includes('version') || f.name.endsWith('metadata.json')) {
+                    try {
+                        const text = new TextDecoder().decode(f.data);
+                        console.log('Metadata content:', text.slice(0, 200));
+                        backupInfo = text;
+                    } catch (e) { }
+                }
+
+                if (f.name.endsWith('.bson') || f.name.includes('db')) {
+                    databases[f.name] = f;
+                }
+            }
+
+            const filesToProcess = [...files];
+            for (const f of filesToProcess) {
+                if (f.name.endsWith('.gz')) {
+                    try {
+                        const dataToCheck = f.data instanceof Uint8Array ? f.data : new Uint8Array(f.data);
+
+                        if (dataToCheck.length >= 2 && dataToCheck[0] === 0x1f && dataToCheck[1] === 0x8b && typeof pako !== 'undefined') {
+                            try {
+                                const decompressed = pako.inflate(dataToCheck);
+                                const baseName = f.name.slice(0, -3);
+
+                                files.push({
+                                    name: baseName + ' (decompressed)',
+                                    size: decompressed.length,
+                                    data: decompressed,
+                                    isDecompressed: true
+                                });
+
+                                console.log('Decompressed:', f.name, '->', baseName, 'size:', decompressed.length);
+                            } catch (decompressErr) {
+                                console.log('Failed to decompress', f.name, ':', decompressErr?.message);
+                            }
+                        } else {
+                            console.log(f.name, 'is extracted and has no additional gzip header');
+                        }
+                    } catch (e) {
+                        console.log('Error processing', f.name, ':', e?.message);
+                    }
+                }
+            }
+
+            displayBackupContents(file, files, backupInfo, databases);
         }
 
         function wordArrayToUint8Array(wordArray) {
@@ -1284,27 +1364,61 @@
         function parseTar(data) {
             const files = [];
             let offset = 0;
-            
-            while (offset < data.length) {
-                // Check for end of archive (two consecutive zero blocks)
-                if (data[offset] === 0 && data[offset + 512] === 0) break;
-                
-                // Read header
+            let pendingLongName = null;
+
+            while (offset + 512 <= data.length) {
+                // End of archive: zero block
+                if (data[offset] === 0) {
+                    let allZero = true;
+                    for (let i = 0; i < 512; i++) {
+                        if (data[offset + i] !== 0) { allZero = false; break; }
+                    }
+                    if (allZero) break;
+                }
+
                 const header = data.slice(offset, offset + 512);
-                const name = readString(header, 0, 100);
+                const typeflag = String.fromCharCode(header[156] || 0);
+                const size = parseInt(readString(header, 124, 12).trim(), 8) || 0;
+                const dataStart = offset + 512;
+                const dataEnd = dataStart + size;
+                const nextOffset = dataStart + Math.ceil(size / 512) * 512;
+
+                // GNU long name: next entry uses this payload as its path
+                if (typeflag === 'L') {
+                    pendingLongName = readString(data, dataStart, size).replace(/\0+$/, '');
+                    offset = nextOffset;
+                    continue;
+                }
+
+                // Skip directories and special entries
+                if (typeflag === '5' || typeflag === '1' || typeflag === '2' ||
+                    typeflag === '3' || typeflag === '4' || typeflag === '6' ||
+                    typeflag === 'g' || typeflag === 'x') {
+                    pendingLongName = null;
+                    offset = nextOffset;
+                    continue;
+                }
+
+                let name;
+                if (pendingLongName) {
+                    name = pendingLongName;
+                    pendingLongName = null;
+                } else {
+                    const rawName = readString(header, 0, 100);
+                    const magic = readString(header, 257, 5);
+                    const prefix = magic === 'ustar' ? readString(header, 345, 155) : '';
+                    name = prefix ? prefix + '/' + rawName : rawName;
+                }
                 if (!name) break;
-                
-                const sizeOctal = readString(header, 124, 12);
-                const size = parseInt(sizeOctal.trim(), 8) || 0;
-                
-                // Read file data
-                const fileData = data.slice(offset + 512, offset + 512 + size);
-                files.push({ name, size, data: fileData });
-                
-                // Move to next file (512-byte aligned)
-                offset += 512 + Math.ceil(size / 512) * 512;
+
+                if (typeflag === '0' || typeflag === '\0' || size > 0) {
+                    const fileData = data.slice(dataStart, dataEnd);
+                    files.push({ name, size: fileData.length, data: fileData });
+                }
+
+                offset = nextOffset;
             }
-            
+
             return files;
         }
         
@@ -1324,10 +1438,16 @@
             const fileSize = (file.size / 1024 / 1024).toFixed(2);
             const fileDate = new Date(file.lastModified).toLocaleString();
 
+            const downloadLabel = window._backupType === 'unifi' ? '📥 Download ZIP' : '📥 Download Fixed ZIP';
+            const backupTypeLabel = window._backupType === 'unifi' ? 'UniFi OS (.unifi)' : 'Network (.unf)';
             infoGrid.innerHTML = `
                 <div class="info-item">
                     <label>File Name</label>
                     <value>${file.name}</value>
+                </div>
+                <div class="info-item">
+                    <label>Backup Type</label>
+                    <value>${backupTypeLabel}</value>
                 </div>
                 <div class="info-item">
                     <label>File Size</label>
@@ -1343,7 +1463,7 @@
                 </div>
                 <div class="info-item" style="grid-column: span 2;">
                     <button class="reset-btn" onclick="downloadZip()" style="width: 100%; background: #667eea; color: white; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
-                        📥 Download Fixed ZIP
+                        ${downloadLabel}
                     </button>
                 </div>
             `;

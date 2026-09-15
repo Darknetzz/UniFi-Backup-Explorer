@@ -1,6 +1,6 @@
 # UniFi Backup Explorer Tool
 
-A pure **clientside JavaScript** tool to decrypt and explore UniFi network backup files (.unf) in your browser.
+A pure **clientside JavaScript** tool to decrypt and explore UniFi backup files (`.unf` and `.unifi`) in your browser.
 
 <img width="1681" height="816" alt="oGkPfHTtUS" src="https://github.com/user-attachments/assets/d580b3a2-a351-473d-9630-113fe4b3c6fc" />
 
@@ -8,41 +8,54 @@ A pure **clientside JavaScript** tool to decrypt and explore UniFi network backu
 ## Features
 
 ✅ **No server required** - Everything runs in your browser  
-✅ **Secure decryption** - Uses AES-128-CBC with hardcoded UniFi keys  
-✅ **File extraction** - Explores ZIP archive contents with proper data descriptor handling  
+✅ **Secure decryption** - Uses hardcoded UniFi AES keys (AES-128 for `.unf`, AES-256 for `.unifi`)  
+✅ **File extraction** - Explores ZIP (`.unf`) and gzip+tar (`.unifi`) contents  
 ✅ **Automatic decompression** - Handles DEFLATE and gzip compression  
 ✅ **BSON to JSON conversion** - View database contents as readable JSON  
 ✅ **Metadata display** - Shows backup file info  
 ✅ **File preview** - View text, JSON, images, and converted BSON data  
-✅ **Download fixed ZIP** - Export decrypted and decompressed backup files  
+✅ **Download ZIP** - Export decrypted and decompressed backup files  
 
 ## How It Works
 
-UniFi backup files (.unf) are encrypted using AES-128-CBC with a static key and IV hardcoded in the UniFi software:
+### `.unf` (Network / site backups)
+
+Encrypted with AES-128-CBC using a static key and IV hardcoded in UniFi software:
 
 - **Key**: `bcyangkmluohmars` (16 bytes)
 - **IV**: `ubntenterpriseap` (16 bytes)
 - **Mode**: CBC with NoPadding
 - **Result**: A ZIP archive containing backup data
 
+### `.unifi` (UniFi OS / console backups)
+
+Encrypted with AES-256-CBC:
+
+- **Key**: `e383b7c53698b36d4baea4ed22181ef73676bfd5d5b90005d9845ffd5dce985f` (32 bytes hex)
+- **IV**: first 16 bytes of the file (ciphertext starts at byte 16)
+- **Mode**: CBC with NoPadding
+- **Result**: gzip → tar archive under `backup/` (network, ucore, users, uos, …)
+
 The tool:
-1. Reads the encrypted .unf file
-2. Decrypts using AES-128-CBC (CryptoJS library)
-3. Repairs ZIP structure if needed (handles data descriptors and malformed EOCD)
-4. Extracts files with DEFLATE decompression
-5. Decompresses gzip files and converts BSON to JSON
+1. Detects `.unf` vs `.unifi` by extension
+2. Decrypts with the matching AES key/IV
+3. For `.unf`: repairs ZIP structure if needed and extracts files
+4. For `.unifi`: gunzips the payload and parses the tar (including GNU long names)
+5. Decompresses nested gzip files and converts BSON to JSON
 6. Displays file list and metadata with interactive preview
-7. Allows downloading a fixed ZIP with all decompressed files
+7. Allows downloading a ZIP with all decompressed files
 
 ## Supported Backup Versions
 
-Works with UniFi backups from v7.0 and later (likely earlier versions too, as the encryption key is static and hardcoded).
+Works with UniFi backups from v7.0 and later (likely earlier versions too, as the encryption keys are static and hardcoded).
 
-Tested with: **v9.5.21**
+Tested with: **v9.5.21** (`.unf`) and UniFi OS console backups (`.unifi`)
 
 ## Backup Contents
 
-UniFi backups typically contain:
+### `.unf` (Network)
+
+Typically contain:
 
 - `db.gz` - Main database (MongoDB BSON, gzipped)
 - `db_stat.gz` - Statistics database
@@ -52,15 +65,26 @@ UniFi backups typically contain:
 - `system.properties` - System configuration
 - `sites/` - Per-site configuration and databases
 
+### `.unifi` (UniFi OS)
+
+Typically contain under `backup/`:
+
+- `metadata.json` - Console backup descriptor
+- `network/db.gz` - Network MongoDB dump (gzipped BSON)
+- `network/version`, `network/timestamp`, `network/system.properties`
+- `ucore/config/*.yaml` - UCore console configuration
+- `ucore/database/` - PostgreSQL `pg_dump` files (`toc.dat`, `*.dat.gz`)
+- `users/`, `uos/` - Additional subsystem data
+
 ## Using the Tool
 
 ### Browser Usage
 
 1. Open `backup-explorer.html` in a modern web browser
-2. Click the drop zone or select a `.unf` backup file
+2. Click the drop zone or select a `.unf` or `.unifi` backup file
 3. Wait for decryption and extraction
 4. Browse files and click to preview contents (BSON files automatically converted to JSON)
-5. Click "📥 Download Fixed ZIP" to export all decrypted and decompressed files
+5. Click the download button to export all decrypted and decompressed files as a ZIP
 
 ### Database Files (BSON)
 
@@ -81,12 +105,12 @@ bsondump db > backup.json
 
 ### Encryption
 
-- **Algorithm**: AES-128 (Rijndael with 128-bit key)
-- **Mode**: CBC (Cipher Block Chaining)
-- **Padding**: None (NoPadding)
-- **Key Derivation**: Static - no derivation, hardcoded in UniFi software
+| Format | Algorithm | Key | IV |
+|--------|-----------|-----|----|
+| `.unf` | AES-128-CBC, NoPadding | static ASCII 16 bytes | static ASCII 16 bytes |
+| `.unifi` | AES-256-CBC, NoPadding | static hex 32 bytes | first 16 bytes of file |
 
-### Decryption Command (OpenSSL)
+### Decryption Command (OpenSSL) — `.unf`
 
 ```bash
 openssl enc -d -in backup.unf -out backup.zip -aes-128-cbc \
@@ -94,10 +118,20 @@ openssl enc -d -in backup.unf -out backup.zip -aes-128-cbc \
   -iv 75626e74656e74657270726973656170 -nopad
 ```
 
+### Decryption Command (OpenSSL) — `.unifi`
+
+```bash
+# IV is the first 16 bytes of the file; ciphertext is the remainder
+IV=$(xxd -p -l 16 backup.unifi)
+dd if=backup.unifi bs=1 skip=16 2>/dev/null | openssl enc -d -aes-256-cbc \
+  -K e383b7c53698b36d4baea4ed22181ef73676bfd5d5b90005d9845ffd5dce985f \
+  -iv "$IV" -nopad | gzip -d > backup.tar
+```
+
 ### Libraries Used
 
-- **CryptoJS 4.2.0** - AES-128-CBC decryption
-- **JSZip 3.10.1** - ZIP file parsing and extraction
+- **CryptoJS 4.2.0** - AES-128/AES-256 CBC decryption
+- **JSZip 3.10.1** - ZIP file parsing and extraction (`.unf`)
 - **pako 2.1.0** - DEFLATE and gzip decompression
 - **BSON 7.0.0** - BSON to JSON conversion
 - **js-bzip2 1.3.8** - Bzip2 decompression support
@@ -129,16 +163,16 @@ Tested on:
 
 ## Troubleshooting
 
-### "Unable to decrypt .unf file"
+### "Unable to decrypt .unf / .unifi file"
 
-The decryption uses static keys from UniFi source code. If decryption fails:
-1. Ensure the file is a valid `.unf` backup from UniFi
+The decryption uses static keys from UniFi software. If decryption fails:
+1. Ensure the file is a valid `.unf` (Network) or `.unifi` (UniFi OS) backup
 2. Check the browser console (F12) for error messages
 3. The file might be from an unsupported UniFi version (though unlikely)
 
 ### "ZIP has structural issues"
 
-The tool automatically handles:
+The tool automatically handles (`.unf` only):
 - Malformed ZIP end-of-central-directory (EOCD) records
 - Data descriptors in local file headers
 - DEFLATE-compressed files within the ZIP
@@ -159,6 +193,7 @@ The tool automatically converts BSON to JSON for viewing in the browser. If this
 ## References
 
 - [UniFi Backup Decrypt (GitHub)](https://github.com/zhangyoufu/unifi-backup-decrypt)
+- [unifi_extract DECRYPTION.md](https://github.com/EvilBit-Labs/unifi_extract/blob/main/DECRYPTION.md)
 - [CryptoJS Documentation](https://cryptojs.gitbook.io/)
 - [JSZip Documentation](https://stuk.github.io/jszip/)
 - [MongoDB BSON Specification](https://bsonspec.org/)
