@@ -4,7 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UniFi Backup Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-1: #3d5a80;
+            --bg-2: #1b3a4b;
+            --accent: #4a7fd4;
+            --accent-strong: #2f5fad;
+            --accent-soft: #e8f0fb;
+            --accent-muted: #d6e4f7;
+            --surface: #ffffff;
+            --surface-2: #f4f7fb;
+            --text: #1a2332;
+            --text-muted: #5a6a7e;
+            --border: #dce5f0;
+            --shadow: 0 12px 40px rgba(27, 58, 75, 0.18);
+            --radius: 14px;
+            --mono: 'IBM Plex Mono', ui-monospace, monospace;
+            --sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,81 +33,95 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: var(--sans);
+            background:
+                radial-gradient(1200px 600px at 10% -10%, rgba(120, 180, 255, 0.35), transparent 55%),
+                radial-gradient(900px 500px at 100% 0%, rgba(70, 140, 200, 0.28), transparent 50%),
+                linear-gradient(155deg, var(--bg-1) 0%, var(--bg-2) 100%);
+            background-attachment: fixed;
             min-height: 100vh;
-            padding: 20px;
+            padding: 28px 20px 40px;
+            color: var(--text);
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1100px;
             margin: 0 auto;
         }
         
         .header {
             text-align: center;
             color: white;
-            margin-bottom: 30px;
+            margin-bottom: 28px;
         }
         
         .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+            font-size: clamp(1.85rem, 4vw, 2.45rem);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
         }
         
         .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
+            font-size: 1.05rem;
+            opacity: 0.88;
+            font-weight: 400;
+            max-width: 36em;
+            margin: 0 auto;
+            line-height: 1.45;
         }
         
         .upload-section {
-            background: white;
-            border-radius: 12px;
-            padding: 40px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-            position: relative; /* allow input overlay */
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 36px;
+            box-shadow: var(--shadow);
+            margin-bottom: 24px;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.4);
         }
         
         .drop-zone {
-            border: 3px dashed #667eea;
-            border-radius: 8px;
-            padding: 60px 20px;
+            border: 2px dashed var(--accent);
+            border-radius: 12px;
+            padding: 56px 24px;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s ease;
-            background: #f8f9ff;
+            transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+            background: var(--accent-soft);
             position: relative;
             z-index: 1;
         }
         
         .drop-zone:hover {
-            border-color: #764ba2;
-            background: #f0f2ff;
+            border-color: var(--accent-strong);
+            background: var(--accent-muted);
         }
         
         .drop-zone.drag-over {
-            border-color: #764ba2;
-            background: #e8ebff;
-            transform: scale(1.02);
+            border-color: var(--accent-strong);
+            background: #cfe0f5;
+            transform: scale(1.01);
         }
         
         .drop-zone svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 20px;
-            color: #667eea;
+            width: 56px;
+            height: 56px;
+            margin-bottom: 16px;
+            color: var(--accent);
         }
         
         .drop-zone p {
-            font-size: 1.2rem;
-            color: #333;
-            margin-bottom: 10px;
+            font-size: 1.15rem;
+            color: var(--text);
+            margin-bottom: 8px;
+            font-weight: 500;
         }
         
         .drop-zone span {
             font-size: 0.9rem;
-            color: #666;
+            color: var(--text-muted);
         }
         
         .file-input {
@@ -100,11 +135,12 @@
         }
         
         .info-section {
-            background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 32px;
+            box-shadow: var(--shadow);
             display: none;
+            border: 1px solid rgba(255, 255, 255, 0.4);
         }
         
         .info-section.visible {
@@ -112,99 +148,148 @@
         }
         
         .file-info {
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #f0f0f0;
+            margin-bottom: 28px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--border);
         }
         
         .file-info h2 {
-            color: #667eea;
-            margin-bottom: 15px;
+            color: var(--accent-strong);
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             gap: 10px;
+            font-size: 1.25rem;
+            font-weight: 600;
         }
         
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-top: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 12px;
         }
         
         .info-item {
-            background: #f8f9ff;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
+            background: var(--surface-2);
+            padding: 14px 16px;
+            border-radius: 10px;
+            border-left: 3px solid var(--accent);
+            min-height: 76px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         
         .info-item label {
-            font-size: 0.85rem;
-            color: #666;
+            font-size: 0.72rem;
+            color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 6px;
+            font-weight: 600;
         }
         
         .info-item value {
-            font-size: 1.1rem;
-            color: #333;
+            font-size: 0.98rem;
+            color: var(--text);
             font-weight: 500;
             display: block;
+            line-height: 1.35;
+            word-break: break-word;
+        }
+        
+        .info-item.download-item {
+            grid-column: 1 / -1;
+            border-left: none;
+            background: transparent;
+            padding: 4px 0 0;
+            min-height: 0;
         }
         
         .data-section {
-            margin-top: 30px;
+            margin-top: 8px;
         }
         
         .data-section h3 {
-            color: #667eea;
-            margin-bottom: 15px;
-            font-size: 1.3rem;
+            color: var(--accent-strong);
+            margin-bottom: 14px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .tip {
+            margin-top: 18px;
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            background: var(--surface-2);
+            border-radius: 8px;
+            padding: 12px 14px;
+            line-height: 1.45;
+        }
+
+        .tip code {
+            font-family: var(--mono);
+            font-size: 0.85em;
+            background: #e6eef8;
+            padding: 1px 5px;
+            border-radius: 4px;
         }
         
         .json-viewer {
-            background: #f8f9fa;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 20px;
-            max-height: 500px;
+            background: #0f1724;
+            border: 1px solid #243147;
+            border-radius: 10px;
+            padding: 18px 20px;
+            max-height: min(60vh, 520px);
             overflow: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
+            font-family: var(--mono);
+            font-size: 0.84rem;
+            line-height: 1.55;
+            color: #d7e0ec;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
         }
         
         .json-viewer pre {
             margin: 0;
             white-space: pre-wrap;
             word-wrap: break-word;
+            font-family: inherit;
+            font-size: inherit;
+            line-height: inherit;
         }
+
+        .json-key { color: #7dd3fc; }
+        .json-string { color: #86efac; }
+        .json-number { color: #fcd34d; }
+        .json-boolean { color: #c4b5fd; }
+        .json-null { color: #94a3b8; font-style: italic; }
+        .json-punctuation { color: #8ba0b8; }
         
         .error {
-            background: #fee;
-            border: 2px solid #fcc;
-            border-radius: 8px;
-            padding: 20px;
-            color: #c33;
-            margin-top: 20px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+            padding: 18px 20px;
+            color: #b91c1c;
+            margin-top: 16px;
         }
         
         .loading {
             text-align: center;
-            padding: 40px;
-            color: #667eea;
+            padding: 48px 24px;
+            color: var(--accent-strong);
         }
         
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border: 3px solid var(--accent-muted);
+            border-top: 3px solid var(--accent);
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
+            width: 44px;
+            height: 44px;
+            animation: spin 0.85s linear infinite;
+            margin: 0 auto 16px;
         }
         
         @keyframes spin {
@@ -213,74 +298,182 @@
         }
         
         .reset-btn {
-            background: #667eea;
+            background: var(--accent);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 1rem;
+            padding: 12px 22px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
             margin-top: 20px;
         }
         
         .reset-btn:hover {
-            background: #764ba2;
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+            background: var(--accent-strong);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(47, 95, 173, 0.28);
+        }
+
+        .reset-btn.btn-block {
+            width: 100%;
+            margin-top: 0;
         }
         
         .collection-table {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 4px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
         }
         
         .collection-table th,
         .collection-table td {
-            padding: 12px;
+            padding: 11px 14px;
             text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .collection-table tbody tr:last-child td {
+            border-bottom: none;
         }
         
         .collection-table th {
-            background: #f8f9ff;
-            color: #667eea;
+            background: var(--surface-2);
+            color: var(--accent-strong);
             font-weight: 600;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .collection-table td:first-child {
+            font-family: var(--mono);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+
+        .collection-table td:nth-child(2) {
+            color: var(--text-muted);
+            white-space: nowrap;
+            width: 1%;
+        }
+
+        .collection-table td:nth-child(3) {
+            width: 1%;
+            white-space: nowrap;
         }
         
-        .collection-table tr:hover {
-            background: #f8f9ff;
+        .collection-table tbody tr {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+
+        .collection-table tbody tr:hover {
+            background: var(--accent-soft);
         }
         
         .badge {
             display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.85rem;
-            font-weight: 500;
+            padding: 3px 9px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            font-family: var(--mono);
+            text-transform: lowercase;
+            letter-spacing: 0.02em;
+            min-width: 2.5rem;
+            text-align: center;
         }
         
         .badge-success {
-            background: #d4edda;
-            color: #155724;
+            background: #dcfce7;
+            color: #166534;
         }
         
         .badge-info {
-            background: #d1ecf1;
-            color: #0c5460;
+            background: #e0f2fe;
+            color: #075985;
         }
         
         .badge-warning {
-            background: #fff3cd;
-            color: #856404;
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-muted {
+            background: #e8eef5;
+            color: #475569;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 36, 0.72);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-panel {
+            background: var(--surface);
+            border-radius: var(--radius);
+            max-width: 920px;
+            width: 100%;
+            max-height: 90vh;
+            overflow: auto;
+            padding: 28px;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+        }
+
+        .modal-panel h2 {
+            color: var(--accent-strong);
+            margin-bottom: 16px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        .modal-meta {
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            font-weight: 400;
+            margin-left: 6px;
+        }
+
+        .modal-panel .reset-btn {
+            margin-top: 16px;
+        }
+
+        .modal-panel img {
+            max-width: 100%;
+            max-height: 70vh;
+            margin-bottom: 16px;
+            border-radius: 8px;
+        }
+
+        @media (max-width: 640px) {
+            body { padding: 16px 12px 28px; }
+            .upload-section, .info-section { padding: 22px 18px; }
+            .drop-zone { padding: 40px 16px; }
+            .collection-table th:nth-child(2),
+            .collection-table td:nth-child(2) { display: none; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔐 UniFi Backup Explorer</h1>
+            <h1>UniFi Backup Explorer</h1>
             <p>Decode and explore .unf and .unifi backup files locally in your browser</p>
         </div>
         
@@ -1438,12 +1631,12 @@
             const fileSize = (file.size / 1024 / 1024).toFixed(2);
             const fileDate = new Date(file.lastModified).toLocaleString();
 
-            const downloadLabel = window._backupType === 'unifi' ? '📥 Download ZIP' : '📥 Download Fixed ZIP';
+            const downloadLabel = window._backupType === 'unifi' ? 'Download ZIP' : 'Download Fixed ZIP';
             const backupTypeLabel = window._backupType === 'unifi' ? 'UniFi OS (.unifi)' : 'Network (.unf)';
             infoGrid.innerHTML = `
                 <div class="info-item">
                     <label>File Name</label>
-                    <value>${file.name}</value>
+                    <value>${escapeHtml(file.name)}</value>
                 </div>
                 <div class="info-item">
                     <label>Backup Type</label>
@@ -1461,14 +1654,12 @@
                     <label>Files in Backup</label>
                     <value>${files.length}</value>
                 </div>
-                <div class="info-item" style="grid-column: span 2;">
-                    <button class="reset-btn" onclick="downloadZip()" style="width: 100%; background: #667eea; color: white; padding: 12px; border-radius: 6px; cursor: pointer; font-size: 0.95rem; font-weight: 600;">
-                        ${downloadLabel}
-                    </button>
+                <div class="info-item download-item">
+                    <button class="reset-btn btn-block" onclick="downloadZip()">${downloadLabel}</button>
                 </div>
             `;
 
-            dataSection.innerHTML = '<h3>📦 Backup Contents</h3>';
+            dataSection.innerHTML = '<h3>Backup Contents</h3>';
             
             let tableHTML = `
                 <table class="collection-table">
@@ -1483,26 +1674,19 @@
             `;
             
             files.forEach(f => {
-                const ext = f.name.split('.').pop();
                 const sizeKB = (f.size / 1024).toFixed(2);
-                const isBSON = f.name.endsWith('.bson');
                 const isDecompressed = f.isDecompressed || f.name.includes('(decompressed)');
                 
                 // Skip decompressed entries in GUI display (they're shown when you click the .gz file)
                 if (isDecompressed) return;
-                
-                let badgeClass = 'badge-success';
-                let badgeText = isBSON ? 'BSON' : ext;
-                
-                if (isBSON) {
-                    badgeClass = 'badge-info';
-                }
+
+                const { label: badgeText, className: badgeClass } = getFileTypeBadge(f.name);
                 
                 tableHTML += `
-                    <tr onclick='showFileContent(${JSON.stringify(f.name)})' style="cursor: pointer;">
-                        <td><strong>${f.name}</strong></td>
+                    <tr onclick='showFileContent(${JSON.stringify(f.name)})'>
+                        <td>${escapeHtml(f.name)}</td>
                         <td>${sizeKB} KB</td>
-                        <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                        <td><span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span></td>
                     </tr>
                 `;
             });
@@ -1513,7 +1697,7 @@
             window.backupFiles = files;
             
             if (Object.keys(databases).length > 0) {
-                dataSection.innerHTML += '<p style="margin-top: 20px; font-size: 0.9rem; color: #666;">💡 Tip: BSON files are MongoDB databases. You can use <code>bsondump</code> (from MongoDB tools) to convert to JSON.</p>';
+                dataSection.innerHTML += '<p class="tip">Tip: BSON files are MongoDB databases. You can use <code>bsondump</code> (from MongoDB tools) to convert to JSON.</p>';
             }
         }
         
@@ -1697,12 +1881,12 @@
                         const blob = new Blob([file.data], { type: file.name.endsWith('.png') ? 'image/png' : 'image/jpeg' });
                         const url = URL.createObjectURL(blob);
                         const modal = document.createElement('div');
-                        modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px;';
+                        modal.className = 'modal-overlay';
                         modal.innerHTML = `
-                            <div style="background: white; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow: auto; padding: 30px; text-align: center;">
-                                <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}</h2>
-                                <img src="${url}" style="max-width: 100%; max-height: 70vh; margin-bottom: 20px;">
-                                <button class="reset-btn" onclick="this.closest('div').parentElement.remove()">Close</button>
+                            <div class="modal-panel" style="text-align: center;">
+                                <h2>${escapeHtml(fileName)}</h2>
+                                <img src="${url}" alt="${escapeHtml(fileName)}">
+                                <button class="reset-btn" onclick="this.closest('.modal-overlay').remove()">Close</button>
                             </div>
                         `;
                         document.body.appendChild(modal);
@@ -1719,19 +1903,26 @@
             }
             
             const modal = document.createElement('div');
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px;';
+            modal.className = 'modal-overlay';
             
             let typeLabel = '';
-            if (displayType === 'gzip-text') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(decompressed from .gz)</span>';
-            else if (displayType === 'bson-json') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(BSON converted to JSON)</span>';
-            else if (displayType === 'bson') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(BSON database file)</span>';
-            else if (displayType === 'hex') typeLabel = ' <span style="color: #666; font-size: 0.85rem;">(hex dump - binary file)</span>';
+            if (displayType === 'gzip-text') typeLabel = 'decompressed from .gz';
+            else if (displayType === 'bson-json') typeLabel = 'BSON converted to JSON';
+            else if (displayType === 'bson') typeLabel = 'BSON database file';
+            else if (displayType === 'hex') typeLabel = 'hex dump — binary file';
+
+            const previewText = isText ? content.substring(0, 100000) : content;
+            const useJsonHighlight = shouldHighlightJson(file.name, displayType, previewText);
+            const renderedContent = useJsonHighlight
+                ? highlightJson(previewText)
+                : escapeHtml(previewText);
+            const metaHtml = typeLabel ? ` <span class="modal-meta">(${typeLabel})</span>` : '';
             
             modal.innerHTML = `
-                <div style="background: white; border-radius: 12px; max-width: 900px; width: 100%; max-height: 90vh; overflow: auto; padding: 30px;">
-                    <h2 style="color: #667eea; margin-bottom: 20px;">${fileName}${typeLabel}</h2>
-                    <div class="json-viewer"><pre style="font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.4;">${escapeHtml(isText ? content.substring(0, 100000) : content)}</pre></div>
-                    <button class="reset-btn" onclick="this.closest('div').parentElement.remove()">Close</button>
+                <div class="modal-panel">
+                    <h2>${escapeHtml(fileName)}${metaHtml}</h2>
+                    <div class="json-viewer"><pre>${renderedContent}</pre></div>
+                    <button class="reset-btn" onclick="this.closest('.modal-overlay').remove()">Close</button>
                 </div>
             `;
             document.body.appendChild(modal);
@@ -2029,6 +2220,64 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function getFileExtension(fileName) {
+            const base = fileName.split('/').pop() || fileName;
+            const dot = base.lastIndexOf('.');
+            if (dot <= 0 || dot === base.length - 1) return '';
+            return base.slice(dot + 1).toLowerCase();
+        }
+
+        function getFileTypeBadge(fileName) {
+            const ext = getFileExtension(fileName);
+            if (!ext) return { label: 'file', className: 'badge-muted' };
+            if (ext === 'bson') return { label: 'bson', className: 'badge-info' };
+            if (ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'properties' || ext === 'txt') {
+                return { label: ext, className: 'badge-success' };
+            }
+            if (ext === 'gz' || ext === 'dat' || ext === 'zip') {
+                return { label: ext, className: 'badge-warning' };
+            }
+            return { label: ext, className: 'badge-muted' };
+        }
+
+        function looksLikeJson(text) {
+            const trimmed = text.trim();
+            if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return false;
+            try {
+                JSON.parse(trimmed);
+                return true;
+            } catch (e) {
+                // Truncated previews may not parse; still highlight if shape looks like JSON
+                return /^[\s]*[\[{]/.test(trimmed) && /[",:\d\[\]{}truefalsenull\s.-]/.test(trimmed);
+            }
+        }
+
+        function shouldHighlightJson(fileName, displayType, content) {
+            if (displayType === 'bson-json') return true;
+            if (getFileExtension(fileName) === 'json') return true;
+            if (displayType === 'hex' || displayType === 'bson') return false;
+            return looksLikeJson(content);
+        }
+
+        function highlightJson(text) {
+            const escaped = escapeHtml(text);
+            return escaped.replace(
+                /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\b(null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|([{}\[\],:])/g,
+                (match, stringLiteral, isKey, boolLiteral, nullLiteral, punctuation) => {
+                    if (stringLiteral) {
+                        if (isKey) {
+                            return `<span class="json-key">${stringLiteral}</span>${isKey}`;
+                        }
+                        return `<span class="json-string">${stringLiteral}</span>`;
+                    }
+                    if (boolLiteral) return `<span class="json-boolean">${boolLiteral}</span>`;
+                    if (nullLiteral) return `<span class="json-null">${nullLiteral}</span>`;
+                    if (punctuation) return `<span class="json-punctuation">${punctuation}</span>`;
+                    return `<span class="json-number">${match}</span>`;
+                }
+            );
         }
     </script>
 </body>
