@@ -491,7 +491,7 @@
         <div class="info-section" id="infoSection">
             <div class="file-info">
                 <h2>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                         <polyline points="13 2 13 9 20 9"></polyline>
                     </svg>
@@ -1911,7 +1911,7 @@
             else if (displayType === 'bson') typeLabel = 'BSON database file';
             else if (displayType === 'hex') typeLabel = 'hex dump — binary file';
 
-            const previewText = isText ? content.substring(0, 100000) : content;
+            const previewText = formatJsonPreview(isText ? content.substring(0, 100000) : content, file.name, displayType);
             const useJsonHighlight = shouldHighlightJson(file.name, displayType, previewText);
             const renderedContent = useJsonHighlight
                 ? highlightJson(previewText)
@@ -1932,9 +1932,18 @@
         }
 
         function showError(message) {
+            loadingDiv.style.display = 'none';
+            document.querySelector('.upload-section').style.display = 'none';
             infoSection.classList.add('visible');
-            const extra = window._bzip2Unavailable ? '<div style="margin-top:8px;color:#a33;font-size:0.9rem;">bzip2 library did not load; bz2 entries (if any) cannot be decompressed.</div>' : '';
-            infoSection.innerHTML = `<div class="error">${message}${extra}</div><button class="reset-btn" onclick="reset()">Try Again</button>`;
+            const extra = window._bzip2Unavailable
+                ? '<div style="margin-top:8px;color:#a33;font-size:0.9rem;">bzip2 library did not load; bz2 entries (if any) cannot be decompressed.</div>'
+                : '';
+            if (infoGrid) {
+                infoGrid.innerHTML = '';
+                dataSection.innerHTML = `<div class="error">${message}${extra}</div><button class="reset-btn" onclick="reset()">Try Again</button>`;
+            } else {
+                infoSection.innerHTML = `<div class="error">${message}${extra}</div><button class="reset-btn" onclick="reset()">Try Again</button>`;
+            }
         }
 
         // CRC-32 calculation function
@@ -2211,9 +2220,11 @@
         function reset() {
             fileInput.value = '';
             infoSection.classList.remove('visible');
-            infoSection.innerHTML = '';
+            if (infoGrid) infoGrid.innerHTML = '';
+            if (dataSection) dataSection.innerHTML = '';
             document.querySelector('.upload-section').style.display = 'block';
             loadingDiv.style.display = 'none';
+            window.backupFiles = null;
         }
 
         function escapeHtml(text) {
@@ -2240,6 +2251,18 @@
                 return { label: ext, className: 'badge-warning' };
             }
             return { label: ext, className: 'badge-muted' };
+        }
+
+        function formatJsonPreview(text, fileName, displayType) {
+            if (displayType === 'hex' || displayType === 'bson') return text;
+            const preferJson = displayType === 'bson-json' || getFileExtension(fileName) === 'json';
+            const trimmed = text.trim();
+            if (!preferJson && !(trimmed.startsWith('{') || trimmed.startsWith('['))) return text;
+            try {
+                return JSON.stringify(JSON.parse(trimmed), null, 2);
+            } catch (e) {
+                return text;
+            }
         }
 
         function looksLikeJson(text) {
