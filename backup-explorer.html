@@ -152,7 +152,7 @@
         [data-theme="light"] .theme-toggle .icon-moon { display: none; }
         
         .container {
-            max-width: 1100px;
+            max-width: 1400px;
             margin: 0 auto;
         }
         
@@ -367,11 +367,6 @@
             line-height: inherit;
         }
 
-        .modal-panel-wide {
-            max-width: min(1400px, 98vw);
-            max-height: 96vh;
-        }
-
         .bson-browser {
             display: grid;
             grid-template-columns: minmax(200px, 300px) 1fr;
@@ -523,6 +518,7 @@
         .json-boolean { color: #c4b5fd; }
         .json-null { color: #94a3b8; font-style: italic; }
         .json-punctuation { color: #8ba0b8; }
+        .prop-comment { color: #64748b; font-style: italic; }
         
         .error {
             background: var(--error-bg);
@@ -696,6 +692,11 @@
             overflow: auto;
             padding: 28px;
             box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+        }
+
+        .modal-panel.modal-panel-wide {
+            max-width: min(1480px, 98vw);
+            max-height: 96vh;
         }
 
         .modal-panel h2 {
@@ -2515,10 +2516,7 @@
             else if (displayType === 'hex') typeLabel = 'hex dump — binary file';
 
             const previewText = formatJsonPreview(isText ? content.substring(0, 100000) : content, file.name, displayType);
-            const useJsonHighlight = shouldHighlightJson(file.name, displayType, previewText);
-            const renderedContent = useJsonHighlight
-                ? highlightJson(previewText)
-                : escapeHtml(previewText);
+            const renderedContent = renderHighlightedPreview(previewText, file.name, displayType);
             const metaHtml = typeLabel ? ` <span class="modal-meta">(${typeLabel})</span>` : '';
             
             modal.innerHTML = `
@@ -2895,6 +2893,16 @@
             return looksLikeJson(content);
         }
 
+        function shouldHighlightProperties(fileName) {
+            return getFileExtension(fileName) === 'properties';
+        }
+
+        function renderHighlightedPreview(text, fileName, displayType) {
+            if (shouldHighlightJson(fileName, displayType, text)) return highlightJson(text);
+            if (shouldHighlightProperties(fileName)) return highlightProperties(text);
+            return escapeHtml(text);
+        }
+
         function highlightJson(text) {
             const escaped = escapeHtml(text);
             return escaped.replace(
@@ -2912,6 +2920,42 @@
                     return `<span class="json-number">${match}</span>`;
                 }
             );
+        }
+
+        function highlightPropertyValue(value) {
+            if (!value) return value;
+            return value.replace(
+                /\b(true|false)\b|\b(null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+                (match, boolLiteral, nullLiteral) => {
+                    if (boolLiteral) return `<span class="json-boolean">${boolLiteral}</span>`;
+                    if (nullLiteral) return `<span class="json-null">${nullLiteral}</span>`;
+                    return `<span class="json-number">${match}</span>`;
+                }
+            );
+        }
+
+        function highlightPropertyAssignment(text) {
+            // Keys are identifiers (dots/underscores/hyphens); avoids mistaking prose comments with ":" for assignments
+            const match = text.match(/^(\s*)([A-Za-z0-9_.\-]+)(\s*[=:]\s*)(.*)$/);
+            if (!match) return null;
+            const [, ws, key, sep, value] = match;
+            return `${ws}<span class="json-key">${key}</span><span class="json-punctuation">${sep}</span><span class="json-string">${highlightPropertyValue(value)}</span>`;
+        }
+
+        function highlightProperties(text) {
+            return text.split('\n').map((line) => {
+                const escaped = escapeHtml(line);
+                const commentMatch = escaped.match(/^(\s*)([#!])(.*)$/);
+                if (commentMatch) {
+                    const [, ws, marker, rest] = commentMatch;
+                    const assignment = highlightPropertyAssignment(rest);
+                    if (assignment) {
+                        return `${ws}<span class="prop-comment">${marker}</span>${assignment}`;
+                    }
+                    return `${ws}<span class="prop-comment">${marker}${rest}</span>`;
+                }
+                return highlightPropertyAssignment(escaped) || escaped;
+            }).join('\n');
         }
     </script>
 </body>
