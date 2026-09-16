@@ -4,11 +4,60 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UniFi Backup Explorer</title>
+    <script>
+        (function () {
+            var theme = localStorage.getItem('ube-theme');
+            if (theme !== 'light' && theme !== 'dark') theme = 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
+            --radius: 14px;
+            --mono: 'IBM Plex Mono', ui-monospace, monospace;
+            --sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        }
+
+        /* Dark is the default */
+        :root,
+        [data-theme="dark"] {
+            color-scheme: dark;
+            --bg-1: #1a2d42;
+            --bg-2: #0b1520;
+            --accent: #5b8fd9;
+            --accent-strong: #8bb4ea;
+            --accent-soft: #1a2838;
+            --accent-muted: #243548;
+            --surface: #141c28;
+            --surface-2: #1c2736;
+            --text: #e8eef6;
+            --text-muted: #94a3b8;
+            --border: #2a3a4f;
+            --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --glow-1: rgba(80, 140, 220, 0.22);
+            --glow-2: rgba(40, 90, 150, 0.18);
+            --drop-drag: #2a4058;
+            --code-bg: #243447;
+            --error-bg: #3b1515;
+            --error-border: #7f1d1d;
+            --error-text: #fca5a5;
+            --badge-success-bg: #14532d;
+            --badge-success-text: #86efac;
+            --badge-info-bg: #0c4a6e;
+            --badge-info-text: #7dd3fc;
+            --badge-warning-bg: #78350f;
+            --badge-warning-text: #fcd34d;
+            --badge-muted-bg: #334155;
+            --badge-muted-text: #cbd5e1;
+            --btn-shadow: rgba(91, 143, 217, 0.28);
+        }
+
+        [data-theme="light"] {
+            color-scheme: light;
             --bg-1: #3d5a80;
             --bg-2: #1b3a4b;
             --accent: #4a7fd4;
@@ -21,9 +70,23 @@
             --text-muted: #5a6a7e;
             --border: #dce5f0;
             --shadow: 0 12px 40px rgba(27, 58, 75, 0.18);
-            --radius: 14px;
-            --mono: 'IBM Plex Mono', ui-monospace, monospace;
-            --sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+            --panel-border: rgba(255, 255, 255, 0.4);
+            --glow-1: rgba(120, 180, 255, 0.35);
+            --glow-2: rgba(70, 140, 200, 0.28);
+            --drop-drag: #cfe0f5;
+            --code-bg: #e6eef8;
+            --error-bg: #fef2f2;
+            --error-border: #fecaca;
+            --error-text: #b91c1c;
+            --badge-success-bg: #dcfce7;
+            --badge-success-text: #166534;
+            --badge-info-bg: #e0f2fe;
+            --badge-info-text: #075985;
+            --badge-warning-bg: #fef3c7;
+            --badge-warning-text: #92400e;
+            --badge-muted-bg: #e8eef5;
+            --badge-muted-text: #475569;
+            --btn-shadow: rgba(47, 95, 173, 0.28);
         }
 
         * {
@@ -35,14 +98,58 @@
         body {
             font-family: var(--sans);
             background:
-                radial-gradient(1200px 600px at 10% -10%, rgba(120, 180, 255, 0.35), transparent 55%),
-                radial-gradient(900px 500px at 100% 0%, rgba(70, 140, 200, 0.28), transparent 50%),
+                radial-gradient(1200px 600px at 10% -10%, var(--glow-1), transparent 55%),
+                radial-gradient(900px 500px at 100% 0%, var(--glow-2), transparent 50%),
                 linear-gradient(155deg, var(--bg-1) 0%, var(--bg-2) 100%);
             background-attachment: fixed;
             min-height: 100vh;
             padding: 28px 20px 40px;
             color: var(--text);
         }
+
+        .theme-toggle {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 50;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            border: 1px solid var(--panel-border);
+            background: rgba(20, 28, 40, 0.55);
+            color: #e8eef6;
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        [data-theme="light"] .theme-toggle {
+            background: rgba(255, 255, 255, 0.22);
+            color: #ffffff;
+        }
+
+        .theme-toggle:hover {
+            transform: translateY(-1px);
+            background: rgba(20, 28, 40, 0.75);
+        }
+
+        [data-theme="light"] .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.32);
+        }
+
+        .theme-toggle svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .theme-toggle .icon-sun { display: none; }
+        .theme-toggle .icon-moon { display: block; }
+
+        [data-theme="light"] .theme-toggle .icon-sun { display: block; }
+        [data-theme="light"] .theme-toggle .icon-moon { display: none; }
         
         .container {
             max-width: 1100px;
@@ -79,7 +186,7 @@
             box-shadow: var(--shadow);
             margin-bottom: 24px;
             position: relative;
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            border: 1px solid var(--panel-border);
         }
         
         .drop-zone {
@@ -101,7 +208,7 @@
         
         .drop-zone.drag-over {
             border-color: var(--accent-strong);
-            background: #cfe0f5;
+            background: var(--drop-drag);
             transform: scale(1.01);
         }
         
@@ -140,7 +247,7 @@
             padding: 32px;
             box-shadow: var(--shadow);
             display: none;
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            border: 1px solid var(--panel-border);
         }
         
         .info-section.visible {
@@ -232,7 +339,7 @@
         .tip code {
             font-family: var(--mono);
             font-size: 0.85em;
-            background: #e6eef8;
+            background: var(--code-bg);
             padding: 1px 5px;
             border-radius: 4px;
         }
@@ -268,12 +375,19 @@
         .json-punctuation { color: #8ba0b8; }
         
         .error {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
             border-radius: 10px;
             padding: 18px 20px;
-            color: #b91c1c;
+            color: var(--error-text);
             margin-top: 16px;
+        }
+
+        .error-detail {
+            margin-top: 8px;
+            color: var(--error-text);
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         
         .loading {
@@ -314,7 +428,7 @@
         .reset-btn:hover {
             background: var(--accent-strong);
             transform: translateY(-1px);
-            box-shadow: 0 6px 18px rgba(47, 95, 173, 0.28);
+            box-shadow: 0 6px 18px var(--btn-shadow);
         }
 
         .reset-btn.btn-block {
@@ -392,23 +506,23 @@
         }
         
         .badge-success {
-            background: #dcfce7;
-            color: #166534;
+            background: var(--badge-success-bg);
+            color: var(--badge-success-text);
         }
         
         .badge-info {
-            background: #e0f2fe;
-            color: #075985;
+            background: var(--badge-info-bg);
+            color: var(--badge-info-text);
         }
         
         .badge-warning {
-            background: #fef3c7;
-            color: #92400e;
+            background: var(--badge-warning-bg);
+            color: var(--badge-warning-text);
         }
 
         .badge-muted {
-            background: #e8eef5;
-            color: #475569;
+            background: var(--badge-muted-bg);
+            color: var(--badge-muted-text);
         }
 
         .modal-overlay {
@@ -471,6 +585,14 @@
     </style>
 </head>
 <body>
+    <button type="button" class="theme-toggle" id="themeToggle" aria-label="Switch to light mode" title="Toggle theme">
+        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+        </svg>
+        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+    </button>
     <div class="container">
         <div class="header">
             <h1>UniFi Backup Explorer</h1>
@@ -793,6 +915,30 @@
         const loadingDiv = document.getElementById('loadingDiv');
         const infoGrid = document.getElementById('infoGrid');
         const dataSection = document.getElementById('dataSection');
+        const themeToggle = document.getElementById('themeToggle');
+
+        function getTheme() {
+            return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+        }
+
+        function applyTheme(theme) {
+            const next = theme === 'light' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('ube-theme', next);
+            if (themeToggle) {
+                themeToggle.setAttribute(
+                    'aria-label',
+                    next === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'
+                );
+            }
+        }
+
+        if (themeToggle) {
+            applyTheme(getTheme());
+            themeToggle.addEventListener('click', () => {
+                applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
+            });
+        }
 
         function openFileDialog() {
             try {
@@ -1936,7 +2082,7 @@
             document.querySelector('.upload-section').style.display = 'none';
             infoSection.classList.add('visible');
             const extra = window._bzip2Unavailable
-                ? '<div style="margin-top:8px;color:#a33;font-size:0.9rem;">bzip2 library did not load; bz2 entries (if any) cannot be decompressed.</div>'
+                ? '<div class="error-detail">bzip2 library did not load; bz2 entries (if any) cannot be decompressed.</div>'
                 : '';
             if (infoGrid) {
                 infoGrid.innerHTML = '';
