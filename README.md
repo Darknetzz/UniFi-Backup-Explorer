@@ -181,7 +181,14 @@ Tested on:
 ## Files
 
 - `backup-explorer.html` - Main tool (single HTML file with embedded CSS and JavaScript)
+- `scripts/release.ps1` - Local helper to create a GitHub release and attach `backup-explorer.html`
 - `README.md` - This file
+
+```powershell
+./scripts/release.ps1 v2.3.0 -GenerateNotes
+# attach HTML to an existing release:
+./scripts/release.ps1 v2.3.0 -AssetOnly
+```
 
 ## Troubleshooting
 
