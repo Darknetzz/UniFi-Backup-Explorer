@@ -735,6 +735,47 @@
             color: var(--badge-muted-text);
         }
 
+        .page-drop-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(15, 23, 36, 0.55);
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+        }
+
+        body.page-drag-over .page-drop-overlay {
+            display: flex;
+        }
+
+        .page-drop-overlay-inner {
+            border: 2px dashed var(--accent-strong);
+            border-radius: var(--radius);
+            background: var(--surface);
+            color: var(--text);
+            padding: 36px 44px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            max-width: 420px;
+        }
+
+        .page-drop-overlay-inner p {
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+
+        .page-drop-overlay-inner span {
+            display: block;
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -850,6 +891,13 @@
         <div id="loadingDiv" class="upload-section loading" style="display: none;">
             <div class="spinner"></div>
             <p>Processing backup file...</p>
+        </div>
+    </div>
+
+    <div class="page-drop-overlay" id="pageDropOverlay" aria-hidden="true">
+        <div class="page-drop-overlay-inner">
+            <p>Drop to open a new backup</p>
+            <span>Accepts <strong>.unf</strong> or <strong>.unifi</strong> files</span>
         </div>
     </div>
 
@@ -1304,7 +1352,31 @@
             }
         }
 
-        // Drag and drop handlers
+        function isBackupFileName(name) {
+            const nameLower = String(name || '').toLowerCase();
+            return nameLower.endsWith('.unf') || nameLower.endsWith('.unifi');
+        }
+
+        function isFileDragEvent(e) {
+            return !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'));
+        }
+
+        function isProcessingBackup() {
+            return loadingDiv.style.display === 'block';
+        }
+
+        function isBrowsingBackup() {
+            return infoSection.classList.contains('visible') && !isProcessingBackup();
+        }
+
+        function setPageDragActive(active) {
+            document.body.classList.toggle('page-drag-over', active);
+            dropZone.classList.toggle('drag-over', active && dropZone.offsetParent !== null);
+            const overlay = document.getElementById('pageDropOverlay');
+            if (overlay) overlay.setAttribute('aria-hidden', active ? 'false' : 'true');
+        }
+
+        // Drag and drop handlers (document-level so drops work while browsing)
         dropZone.addEventListener('click', () => {
             console.log('dropZone click -> file input');
             openFileDialog();
@@ -1312,24 +1384,45 @@
 
         // Keep a stacking context for drop zone interactions
         dropZone.style.position = 'relative';
-        
-        dropZone.addEventListener('dragover', (e) => {
+
+        let pageDragDepth = 0;
+
+        document.addEventListener('dragenter', (e) => {
+            if (!isFileDragEvent(e) || isProcessingBackup()) return;
             e.preventDefault();
-            dropZone.classList.add('drag-over');
+            pageDragDepth += 1;
+            if (pageDragDepth === 1) setPageDragActive(true);
         });
-        
-        dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('drag-over');
-        });
-        
-        dropZone.addEventListener('drop', (e) => {
+
+        document.addEventListener('dragover', (e) => {
+            if (!isFileDragEvent(e)) return;
             e.preventDefault();
-            dropZone.classList.remove('drag-over');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
-            }
+            if (e.dataTransfer) e.dataTransfer.dropEffect = isProcessingBackup() ? 'none' : 'copy';
+        }, true);
+
+        document.addEventListener('dragleave', (e) => {
+            if (!isFileDragEvent(e)) return;
+            pageDragDepth = Math.max(0, pageDragDepth - 1);
+            if (pageDragDepth === 0) setPageDragActive(false);
         });
+
+        document.addEventListener('drop', (e) => {
+            if (!isFileDragEvent(e)) return;
+            e.preventDefault();
+            pageDragDepth = 0;
+            setPageDragActive(false);
+            if (isProcessingBackup()) return;
+
+            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (!file) return;
+
+            // Avoid a second load if the hidden file input also receives the drop
+            if (fileInput) fileInput.value = '';
+
+            // While browsing, ignore invalid drops so the current view stays intact
+            if (!isBackupFileName(file.name) && isBrowsingBackup()) return;
+            handleFile(file);
+        }, true);
         
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
@@ -1341,7 +1434,7 @@
             const nameLower = file.name.toLowerCase();
             const isUnf = nameLower.endsWith('.unf');
             const isUnifi = nameLower.endsWith('.unifi');
-            if (!isUnf && !isUnifi) {
+            if (!isBackupFileName(file.name)) {
                 showError('Please select a .unf or .unifi backup file');
                 return;
             }
@@ -1351,6 +1444,7 @@
             }
 
             document.querySelector('.upload-section').style.display = 'none';
+            infoSection.classList.remove('visible');
             loadingDiv.style.display = 'block';
             window._backupType = isUnifi ? 'unifi' : 'unf';
             window._decryptedArchive = null;
