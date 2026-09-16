@@ -11,9 +11,13 @@ A pure **clientside JavaScript** tool to decrypt and explore UniFi backup files 
 ✅ **Secure decryption** - Uses hardcoded UniFi AES keys (AES-128 for `.unf`, AES-256 for `.unifi`)  
 ✅ **File extraction** - Explores ZIP (`.unf`) and gzip+tar (`.unifi`) contents  
 ✅ **Automatic decompression** - Handles DEFLATE and gzip compression  
-✅ **BSON to JSON conversion** - View database contents as readable JSON  
-✅ **Metadata display** - Shows backup file info  
-✅ **File preview** - View text, JSON, images, and converted BSON data  
+✅ **BSON collection browser** - Browse MongoDB dump collections and documents in-browser  
+✅ **Syntax highlighting** - Colorized JSON and `.properties` file previews  
+✅ **Drag and drop** - Drop `.unf` / `.unifi` files onto the page (full-page overlay)  
+✅ **Theme toggle** - Light and dark modes (preference saved in `localStorage`)  
+✅ **Session restore** - Last opened backup is cached in IndexedDB and restored on reload  
+✅ **Metadata display** - Backup type, size, date, and file count  
+✅ **File preview** - View text, JSON, images, properties, and BSON data  
 ✅ **Download ZIP** - Export decrypted and decompressed backup files  
 
 ## How It Works
@@ -81,14 +85,18 @@ Typically contain under `backup/`:
 ### Browser Usage
 
 1. Open `backup-explorer.html` in a modern web browser
-2. Click the drop zone or select a `.unf` or `.unifi` backup file
+2. Drop a `.unf` / `.unifi` file onto the page, or click the drop zone to browse
 3. Wait for decryption and extraction
-4. Browse files and click to preview contents (BSON files automatically converted to JSON)
-5. Click the download button to export all decrypted and decompressed files as a ZIP
+4. Browse files and click to preview contents
+5. For `db.gz` / `.bson` dumps, use the collection browser (sidebar + document viewer)
+6. Click the download button to export all decrypted and decompressed files as a ZIP
+7. Use the theme toggle (top-right) to switch light/dark mode
+
+On reload, the last opened backup is restored from IndexedDB when available. Use **Upload Another File** to clear the current session.
 
 ### Database Files (BSON)
 
-The tool automatically converts BSON database files to JSON for viewing in the browser. The downloaded ZIP contains the raw BSON files for use with MongoDB tools.
+MongoDB dumps (`db.gz`, `.bson`) open in a collection browser: filter collections, pick one, and page through documents as highlighted JSON. The downloaded ZIP still contains the raw BSON for use with MongoDB tools.
 
 If you need to work with the BSON files directly:
 
@@ -143,6 +151,7 @@ dd if=backup.unifi bs=1 skip=16 2>/dev/null | openssl enc -d -aes-256-cbc \
 ✅ **No cookies or tracking**  
 ✅ **Open source - inspect the code**  
 
+Theme preference is stored in `localStorage`. The last opened backup may be cached in IndexedDB for restore-on-reload; clearing site data removes it.
 ## Browser Compatibility
 
 Works on any modern browser supporting:
@@ -185,7 +194,7 @@ If files still don't show:
 
 ### Cannot view BSON files
 
-The tool automatically converts BSON to JSON for viewing in the browser. If this fails:
+The tool parses MongoDB dumps into a collection browser. If this fails:
 1. Download the ZIP and use MongoDB tools: `bsondump db > backup.json`
 2. Check the browser console for BSON parsing errors
 3. The BSON file might be corrupted or in an unexpected format
