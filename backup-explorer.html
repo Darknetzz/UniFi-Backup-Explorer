@@ -368,14 +368,15 @@
         }
 
         .modal-panel-wide {
-            max-width: min(1120px, 96vw);
+            max-width: min(1400px, 98vw);
+            max-height: 96vh;
         }
 
         .bson-browser {
             display: grid;
-            grid-template-columns: minmax(180px, 260px) 1fr;
+            grid-template-columns: minmax(200px, 300px) 1fr;
             gap: 14px;
-            min-height: min(58vh, 520px);
+            min-height: min(72vh, 780px);
         }
 
         .bson-sidebar {
@@ -409,7 +410,7 @@
             border: 1px solid var(--border);
             border-radius: 10px;
             background: var(--surface-2);
-            max-height: min(52vh, 460px);
+            max-height: min(70vh, 720px);
             flex: 1;
         }
 
@@ -503,7 +504,7 @@
 
         .bson-browser .json-viewer {
             flex: 1;
-            max-height: min(52vh, 460px);
+            max-height: min(70vh, 720px);
         }
 
         @media (max-width: 720px) {
