@@ -304,9 +304,18 @@
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            display: block;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             margin-bottom: 6px;
             font-weight: 600;
+        }
+
+        .info-item label svg {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            opacity: 0.9;
         }
         
         .info-item value {
@@ -1120,6 +1129,14 @@
         const themeToggle = document.getElementById('themeToggle');
 
         const ICON_DOWNLOAD = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>';
+        const ICON_BACKUP_TYPE = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>';
+        const ICON_FILE_SIZE = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>';
+        const ICON_MODIFIED = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+        const ICON_FILES = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>';
+
+        function infoTile(icon, label, valueHtml) {
+            return `<div class="info-item"><label>${icon}<span>${label}</span></label><value>${valueHtml}</value></div>`;
+        }
 
         function setBackupTitle(name) {
             if (backupTitle) backupTitle.textContent = name || 'Backup Information';
@@ -2132,22 +2149,10 @@
                 : '';
 
             infoGrid.innerHTML = `
-                <div class="info-item">
-                    <label>Backup Type</label>
-                    <value>${backupTypeLabel}</value>
-                </div>
-                <div class="info-item">
-                    <label>File Size</label>
-                    <value>${fileSize} MB</value>
-                </div>
-                <div class="info-item">
-                    <label>Last Modified</label>
-                    <value>${fileDate}</value>
-                </div>
-                <div class="info-item">
-                    <label>Files in Backup</label>
-                    <value>${visibleFileCount}</value>
-                </div>
+                ${infoTile(ICON_BACKUP_TYPE, 'Backup Type', backupTypeLabel)}
+                ${infoTile(ICON_FILE_SIZE, 'File Size', `${fileSize} MB`)}
+                ${infoTile(ICON_MODIFIED, 'Last Modified', fileDate)}
+                ${infoTile(ICON_FILES, 'Files in Backup', visibleFileCount)}
                 <div class="info-item download-item">
                     <div class="download-actions">
                         <button class="reset-btn" type="button" onclick="downloadZip()">${ICON_DOWNLOAD}${primaryLabel}</button>
@@ -3079,14 +3084,8 @@
         function highlightProperties(text) {
             return String(text).split(/\r?\n/).map((line) => {
                 const escaped = escapeHtml(line);
-                const commentMatch = escaped.match(/^(\s*)([#!]+)(.*)$/);
-                if (commentMatch) {
-                    const [, ws, marker, rest] = commentMatch;
-                    const assignment = highlightPropertyAssignment(rest);
-                    if (assignment) {
-                        return `${ws}<span class="prop-comment">${marker}</span>${assignment}`;
-                    }
-                    return `${ws}<span class="prop-comment">${marker}${rest}</span>`;
+                if (/^\s*[#!]/.test(escaped)) {
+                    return `<span class="prop-comment">${escaped}</span>`;
                 }
                 return highlightPropertyAssignment(escaped) || escaped;
             }).join('\n');
