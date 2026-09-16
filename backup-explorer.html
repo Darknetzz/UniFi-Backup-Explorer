@@ -534,13 +534,13 @@
             }
         }
 
-        .json-key { color: #7dd3fc; }
-        .json-string { color: #86efac; }
-        .json-number { color: #fcd34d; }
-        .json-boolean { color: #c4b5fd; }
-        .json-null { color: #94a3b8; font-style: italic; }
-        .json-punctuation { color: #8ba0b8; }
-        .prop-comment { color: #64748b; font-style: italic; }
+        .json-viewer .json-key { color: #7dd3fc; }
+        .json-viewer .json-string { color: #86efac; }
+        .json-viewer .json-number { color: #fcd34d; }
+        .json-viewer .json-boolean { color: #c4b5fd; }
+        .json-viewer .json-null { color: #94a3b8; font-style: italic; }
+        .json-viewer .json-punctuation { color: #8ba0b8; }
+        .json-viewer .prop-comment { color: #64748b; font-style: italic; }
         
         .error {
             background: var(--error-bg);
@@ -2944,8 +2944,18 @@
             return div.innerHTML;
         }
 
+        function normalizePreviewFileName(fileName, displayType) {
+            let name = String(fileName || '').replace(/\\/g, '/');
+            name = name.split('/').pop() || name;
+            name = name.replace(/\s*\(decompressed\)\s*$/i, '');
+            if ((displayType === 'gzip-text' || displayType === 'text') && /\.gz$/i.test(name)) {
+                name = name.replace(/\.gz$/i, '');
+            }
+            return name;
+        }
+
         function getFileExtension(fileName) {
-            const base = fileName.split('/').pop() || fileName;
+            const base = normalizePreviewFileName(fileName);
             const dot = base.lastIndexOf('.');
             if (dot <= 0 || dot === base.length - 1) return '';
             return base.slice(dot + 1).toLowerCase();
@@ -3000,13 +3010,30 @@
             return looksLikeJson(content);
         }
 
-        function shouldHighlightProperties(fileName) {
-            return getFileExtension(fileName) === 'properties';
+        function looksLikeProperties(text) {
+            const lines = String(text || '').split(/\r?\n/).slice(0, 40);
+            if (!lines.length) return false;
+            let hits = 0;
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (/^[#!]/.test(trimmed)) { hits++; continue; }
+                if (/^[A-Za-z0-9_.\-]+\s*[=:]/.test(trimmed)) hits++;
+            }
+            return hits >= 2;
+        }
+
+        function shouldHighlightProperties(fileName, displayType, content) {
+            const name = normalizePreviewFileName(fileName, displayType);
+            if (getFileExtension(name) === 'properties') return true;
+            if (displayType === 'hex' || displayType === 'bson' || displayType === 'bson-json') return false;
+            return looksLikeProperties(content);
         }
 
         function renderHighlightedPreview(text, fileName, displayType) {
+            // Prefer properties over JSON when the name/content indicates a .properties file
+            if (shouldHighlightProperties(fileName, displayType, text)) return highlightProperties(text);
             if (shouldHighlightJson(fileName, displayType, text)) return highlightJson(text);
-            if (shouldHighlightProperties(fileName)) return highlightProperties(text);
             return escapeHtml(text);
         }
 
@@ -3050,9 +3077,9 @@
         }
 
         function highlightProperties(text) {
-            return text.split('\n').map((line) => {
+            return String(text).split(/\r?\n/).map((line) => {
                 const escaped = escapeHtml(line);
-                const commentMatch = escaped.match(/^(\s*)([#!])(.*)$/);
+                const commentMatch = escaped.match(/^(\s*)([#!]+)(.*)$/);
                 if (commentMatch) {
                     const [, ws, marker, rest] = commentMatch;
                     const assignment = highlightPropertyAssignment(rest);
