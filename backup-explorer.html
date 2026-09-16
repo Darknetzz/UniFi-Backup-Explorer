@@ -264,10 +264,21 @@
             color: var(--accent-strong);
             margin-bottom: 16px;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 10px;
             font-size: 1.25rem;
             font-weight: 600;
+            word-break: break-word;
+            line-height: 1.35;
+        }
+
+        .file-info h2 svg {
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .file-info h2 .backup-filename {
+            min-width: 0;
         }
         
         .info-grid {
@@ -313,6 +324,17 @@
             background: transparent;
             padding: 4px 0 0;
             min-height: 0;
+        }
+
+        .download-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .download-actions .reset-btn {
+            margin-top: 0;
+            flex: 1 1 220px;
         }
         
         .data-section {
@@ -560,15 +582,25 @@
         .reset-btn {
             background: var(--accent);
             color: white;
-            border: none;
+            border: 1px solid transparent;
             padding: 12px 22px;
             border-radius: 8px;
             font-size: 0.95rem;
             font-family: inherit;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, border-color 0.2s ease;
             margin-top: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .reset-btn svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
         }
         
         .reset-btn:hover {
@@ -580,6 +612,19 @@
         .reset-btn.btn-block {
             width: 100%;
             margin-top: 0;
+        }
+
+        .reset-btn.btn-secondary {
+            background: transparent;
+            color: var(--accent-strong);
+            border-color: var(--accent);
+            box-shadow: none;
+        }
+
+        .reset-btn.btn-secondary:hover {
+            background: color-mix(in srgb, var(--accent) 14%, transparent);
+            color: var(--accent-strong);
+            box-shadow: none;
         }
         
         .collection-table {
@@ -764,18 +809,23 @@
         <div class="info-section" id="infoSection">
             <div class="file-info">
                 <h2>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                         <polyline points="13 2 13 9 20 9"></polyline>
                     </svg>
-                    Backup Information
+                    <span class="backup-filename" id="backupTitle">Backup Information</span>
                 </h2>
                 <div class="info-grid" id="infoGrid"></div>
             </div>
             
             <div class="data-section" id="dataSection"></div>
             
-            <button class="reset-btn" onclick="reset()">Upload Another File</button>
+            <button class="reset-btn" onclick="reset()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Upload Another File
+            </button>
         </div>
         
         <div id="loadingDiv" class="upload-section loading" style="display: none;">
@@ -1066,7 +1116,36 @@
         const loadingDiv = document.getElementById('loadingDiv');
         const infoGrid = document.getElementById('infoGrid');
         const dataSection = document.getElementById('dataSection');
+        const backupTitle = document.getElementById('backupTitle');
         const themeToggle = document.getElementById('themeToggle');
+
+        const ICON_DOWNLOAD = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>';
+
+        function setBackupTitle(name) {
+            if (backupTitle) backupTitle.textContent = name || 'Backup Information';
+        }
+
+        function downloadBlob(data, filename, mimeType) {
+            const blob = new Blob([data], { type: mimeType || 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function backupBaseName(fileName) {
+            return String(fileName || 'backup').replace(/\.(unf|unifi)$/i, '');
+        }
+
+        function setDecryptedArchive(bytes, { extension, mime, label }) {
+            window._decryptedArchive = bytes && bytes.length
+                ? { bytes, extension, mime, label }
+                : null;
+        }
 
         const BACKUP_DB_NAME = 'ube-backup-store';
         const BACKUP_DB_VERSION = 1;
@@ -1247,6 +1326,8 @@
             document.querySelector('.upload-section').style.display = 'none';
             loadingDiv.style.display = 'block';
             window._backupType = isUnifi ? 'unifi' : 'unf';
+            window._decryptedArchive = null;
+            window._backupFileName = file.name;
 
             try {
                 const arrayBuffer = await file.arrayBuffer();
@@ -1753,6 +1834,11 @@
                         }
                     }
                     
+                    setDecryptedArchive(decryptedBytes, {
+                        extension: 'zip',
+                        mime: 'application/zip',
+                        label: 'Download Decrypted ZIP'
+                    });
                     processExtractedFiles(file, files);
                     
                 } catch (e) {
@@ -1837,7 +1923,12 @@
             if (files.length === 0) {
                 throw new Error('TAR archive is empty after decrypting .unifi');
             }
-            console.log('Extracted', files.length, 'files from tar');
+                    console.log('Extracted', files.length, 'files from tar');
+            setDecryptedArchive(tarBytes, {
+                extension: 'tar',
+                mime: 'application/x-tar',
+                label: 'Download Decrypted TAR'
+            });
             return files;
         }
 
@@ -2025,17 +2116,22 @@
         function displayBackupContents(file, files, backupInfo, databases) {
             loadingDiv.style.display = 'none';
             infoSection.classList.add('visible');
+            setBackupTitle(file.name);
+            window._backupFileName = file.name;
 
             const fileSize = (file.size / 1024 / 1024).toFixed(2);
             const fileDate = new Date(file.lastModified).toLocaleString();
 
-            const downloadLabel = window._backupType === 'unifi' ? 'Download ZIP' : 'Download Fixed ZIP';
-            const backupTypeLabel = window._backupType === 'unifi' ? 'UniFi OS (.unifi)' : 'Network (.unf)';
+            const isUnifi = window._backupType === 'unifi';
+            const primaryLabel = isUnifi ? 'Download ZIP' : 'Download Fixed ZIP';
+            const backupTypeLabel = isUnifi ? 'UniFi OS (.unifi)' : 'Network (.unf)';
+            const visibleFileCount = files.filter(f => !(f.isDecompressed || f.name.includes('(decompressed)'))).length;
+            const decrypted = window._decryptedArchive;
+            const secondaryBtn = decrypted
+                ? `<button class="reset-btn btn-secondary" type="button" onclick="downloadDecryptedArchive()">${ICON_DOWNLOAD}${escapeHtml(decrypted.label)}</button>`
+                : '';
+
             infoGrid.innerHTML = `
-                <div class="info-item">
-                    <label>File Name</label>
-                    <value>${escapeHtml(file.name)}</value>
-                </div>
                 <div class="info-item">
                     <label>Backup Type</label>
                     <value>${backupTypeLabel}</value>
@@ -2050,10 +2146,13 @@
                 </div>
                 <div class="info-item">
                     <label>Files in Backup</label>
-                    <value>${files.length}</value>
+                    <value>${visibleFileCount}</value>
                 </div>
                 <div class="info-item download-item">
-                    <button class="reset-btn btn-block" onclick="downloadZip()">${downloadLabel}</button>
+                    <div class="download-actions">
+                        <button class="reset-btn" type="button" onclick="downloadZip()">${ICON_DOWNLOAD}${primaryLabel}</button>
+                        ${secondaryBtn}
+                    </div>
                 </div>
             `;
 
@@ -2807,15 +2906,20 @@
             }
 
             const zipData = reconstructZip(window.backupFiles);
-            const blob = new Blob([zipData], { type: 'application/zip' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'backup.zip';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            const base = backupBaseName(window._backupFileName);
+            const suffix = window._backupType === 'unifi' ? 'contents' : 'fixed';
+            downloadBlob(zipData, `${base}.${suffix}.zip`, 'application/zip');
+        }
+
+        function downloadDecryptedArchive() {
+            const archive = window._decryptedArchive;
+            if (!archive || !archive.bytes || !archive.bytes.length) {
+                alert('No decrypted archive available to download');
+                return;
+            }
+
+            const base = backupBaseName(window._backupFileName);
+            downloadBlob(archive.bytes, `${base}.decrypted.${archive.extension}`, archive.mime);
         }
 
         function reset() {
@@ -2823,9 +2927,12 @@
             infoSection.classList.remove('visible');
             if (infoGrid) infoGrid.innerHTML = '';
             if (dataSection) dataSection.innerHTML = '';
+            setBackupTitle('Backup Information');
             document.querySelector('.upload-section').style.display = 'block';
             loadingDiv.style.display = 'none';
             window.backupFiles = null;
+            window._backupFileName = null;
+            window._decryptedArchive = null;
             clearCachedBackup();
         }
 
