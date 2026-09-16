@@ -367,6 +367,155 @@
             line-height: inherit;
         }
 
+        .modal-panel-wide {
+            max-width: min(1120px, 96vw);
+        }
+
+        .bson-browser {
+            display: grid;
+            grid-template-columns: minmax(180px, 260px) 1fr;
+            gap: 14px;
+            min-height: min(58vh, 520px);
+        }
+
+        .bson-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
+        }
+
+        .bson-filter {
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-2);
+            color: var(--text);
+            padding: 8px 10px;
+            font-family: var(--sans);
+            font-size: 0.88rem;
+        }
+
+        .bson-filter:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+
+        .bson-collections {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            overflow: auto;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface-2);
+            max-height: min(52vh, 460px);
+            flex: 1;
+        }
+
+        .bson-collections li button {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            border: 0;
+            border-bottom: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            text-align: left;
+            padding: 10px 12px;
+            cursor: pointer;
+            font-family: var(--sans);
+            font-size: 0.86rem;
+        }
+
+        .bson-collections li:last-child button {
+            border-bottom: 0;
+        }
+
+        .bson-collections li button:hover {
+            background: var(--accent-muted);
+        }
+
+        .bson-collections li button.active {
+            background: var(--accent-soft);
+            color: var(--accent-strong);
+            font-weight: 600;
+        }
+
+        .bson-collections .coll-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .bson-collections .coll-count {
+            flex-shrink: 0;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .bson-main {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .bson-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: 0.86rem;
+        }
+
+        .bson-toolbar .bson-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .bson-toolbar button {
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-family: var(--sans);
+            font-size: 0.82rem;
+            cursor: pointer;
+        }
+
+        .bson-toolbar button:hover:not(:disabled) {
+            background: var(--accent-muted);
+        }
+
+        .bson-toolbar button:disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
+
+        .bson-browser .json-viewer {
+            flex: 1;
+            max-height: min(52vh, 460px);
+        }
+
+        @media (max-width: 720px) {
+            .bson-browser {
+                grid-template-columns: 1fr;
+            }
+
+            .bson-collections {
+                max-height: 180px;
+            }
+        }
+
         .json-key { color: #7dd3fc; }
         .json-string { color: #86efac; }
         .json-number { color: #fcd34d; }
@@ -1944,7 +2093,267 @@
             window.backupFiles = files;
             
             if (Object.keys(databases).length > 0) {
-                dataSection.innerHTML += '<p class="tip">Tip: BSON files are MongoDB databases. You can use <code>bsondump</code> (from MongoDB tools) to convert to JSON.</p>';
+                dataSection.innerHTML += '<p class="tip">Tip: Click a <code>db.gz</code> or <code>.bson</code> file to browse MongoDB collections in the browser.</p>';
+            }
+        }
+
+        const BSON_PAGE_SIZE = 50;
+        const UNGROUPED_COLLECTION = '(documents)';
+
+        function getBsonApi() {
+            if (typeof BSON === 'undefined') return null;
+            // bson.bundle exposes either BSON.deserialize or BSON.BSON.deserialize
+            if (typeof BSON.deserialize === 'function') return BSON;
+            if (BSON.BSON && typeof BSON.BSON.deserialize === 'function') return BSON.BSON;
+            return null;
+        }
+
+        function readBsonDocSize(bytes, offset) {
+            return (bytes[offset] |
+                (bytes[offset + 1] << 8) |
+                (bytes[offset + 2] << 16) |
+                (bytes[offset + 3] << 24)) >>> 0;
+        }
+
+        function looksLikeBson(bytes) {
+            if (!bytes || bytes.length < 5) return false;
+            const size = readBsonDocSize(bytes, 0);
+            return size >= 5 && size <= bytes.length && bytes[size - 1] === 0;
+        }
+
+        function isDbLikeFileName(fileName) {
+            const base = (fileName.split('/').pop() || fileName)
+                .replace(/\s*\(decompressed\)\s*$/i, '')
+                .toLowerCase();
+            return base.endsWith('.bson') ||
+                base === 'db' ||
+                base === 'db.gz' ||
+                /^db[_(-]/.test(base) ||
+                base.includes('db.gz');
+        }
+
+        function getSelectCollection(doc) {
+            if (!doc || typeof doc !== 'object') return null;
+            const cmd = doc.__cmd ?? doc.cmd;
+            if (cmd === 'select' && typeof doc.collection === 'string' && doc.collection) {
+                return doc.collection;
+            }
+            return null;
+        }
+
+        function parseBsonDump(bytes) {
+            const api = getBsonApi();
+            if (!api) throw new Error('BSON library not loaded');
+
+            const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+            const documents = [];
+            let offset = 0;
+
+            while (offset + 4 <= data.length) {
+                const docSize = readBsonDocSize(data, offset);
+                if (docSize < 5 || offset + docSize > data.length) break;
+                if (data[offset + docSize - 1] !== 0) break;
+
+                const docBytes = data.subarray(offset, offset + docSize);
+                documents.push(api.deserialize(docBytes));
+                offset += docSize;
+            }
+
+            if (documents.length === 0) {
+                throw new Error('No BSON documents parsed');
+            }
+
+            const collections = Object.create(null);
+            const order = [];
+            let current = UNGROUPED_COLLECTION;
+            let usedSelectCommands = false;
+
+            const ensureCollection = (name) => {
+                if (!collections[name]) {
+                    collections[name] = [];
+                    order.push(name);
+                }
+            };
+
+            for (const doc of documents) {
+                const selected = getSelectCollection(doc);
+                if (selected) {
+                    usedSelectCommands = true;
+                    current = selected;
+                    ensureCollection(current);
+                    continue;
+                }
+                ensureCollection(current);
+                collections[current].push(doc);
+            }
+
+            if (usedSelectCommands && collections[UNGROUPED_COLLECTION] && collections[UNGROUPED_COLLECTION].length === 0) {
+                delete collections[UNGROUPED_COLLECTION];
+                const idx = order.indexOf(UNGROUPED_COLLECTION);
+                if (idx >= 0) order.splice(idx, 1);
+            }
+
+            return {
+                documents,
+                collections,
+                order: order.filter((name) => collections[name]),
+                totalDocs: documents.length,
+                bytesParsed: offset,
+                bytesTotal: data.length
+            };
+        }
+
+        function stringifyBsonValue(value) {
+            const api = getBsonApi();
+            try {
+                if (api && api.EJSON && typeof api.EJSON.stringify === 'function') {
+                    return api.EJSON.stringify(value, null, 2);
+                }
+            } catch (e) {
+                // Fall through to JSON
+            }
+            return JSON.stringify(value, null, 2);
+        }
+
+        function showBsonBrowser(fileName, dump) {
+            const collectionNames = dump.order.length
+                ? dump.order
+                : Object.keys(dump.collections);
+            if (collectionNames.length === 0) return false;
+
+            let activeCollection = collectionNames[0];
+            let page = 0;
+
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+
+            const metaParts = [
+                `${collectionNames.length} collection${collectionNames.length === 1 ? '' : 's'}`,
+                `${dump.totalDocs} document${dump.totalDocs === 1 ? '' : 's'}`
+            ];
+            if (dump.bytesParsed < dump.bytesTotal) {
+                metaParts.push(`parsed ${dump.bytesParsed}/${dump.bytesTotal} bytes`);
+            }
+
+            modal.innerHTML = `
+                <div class="modal-panel modal-panel-wide">
+                    <h2>${escapeHtml(fileName)} <span class="modal-meta">(BSON database — ${escapeHtml(metaParts.join(' · '))})</span></h2>
+                    <div class="bson-browser">
+                        <div class="bson-sidebar">
+                            <input type="search" class="bson-filter" placeholder="Filter collections…" aria-label="Filter collections">
+                            <ul class="bson-collections"></ul>
+                        </div>
+                        <div class="bson-main">
+                            <div class="bson-toolbar">
+                                <div class="bson-status"></div>
+                                <div class="bson-actions">
+                                    <button type="button" class="bson-prev">Previous</button>
+                                    <button type="button" class="bson-next">Next</button>
+                                    <button type="button" class="bson-copy">Copy JSON</button>
+                                </div>
+                            </div>
+                            <div class="json-viewer"><pre></pre></div>
+                        </div>
+                    </div>
+                    <button class="reset-btn" type="button">Close</button>
+                </div>
+            `;
+
+            const filterInput = modal.querySelector('.bson-filter');
+            const listEl = modal.querySelector('.bson-collections');
+            const statusEl = modal.querySelector('.bson-status');
+            const preEl = modal.querySelector('.json-viewer pre');
+            const prevBtn = modal.querySelector('.bson-prev');
+            const nextBtn = modal.querySelector('.bson-next');
+            const copyBtn = modal.querySelector('.bson-copy');
+            const closeBtn = modal.querySelector('.reset-btn');
+
+            const getDocs = () => dump.collections[activeCollection] || [];
+
+            const renderList = () => {
+                const query = (filterInput.value || '').trim().toLowerCase();
+                listEl.innerHTML = '';
+                collectionNames.forEach((name) => {
+                    if (query && !name.toLowerCase().includes(query)) return;
+                    const count = (dump.collections[name] || []).length;
+                    const li = document.createElement('li');
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = name === activeCollection ? 'active' : '';
+                    btn.innerHTML = `<span class="coll-name">${escapeHtml(name)}</span><span class="coll-count">${count}</span>`;
+                    btn.addEventListener('click', () => {
+                        activeCollection = name;
+                        page = 0;
+                        renderList();
+                        renderDocs();
+                    });
+                    li.appendChild(btn);
+                    listEl.appendChild(li);
+                });
+            };
+
+            const renderDocs = () => {
+                const docs = getDocs();
+                const totalPages = Math.max(1, Math.ceil(docs.length / BSON_PAGE_SIZE) || 1);
+                if (page >= totalPages) page = totalPages - 1;
+                if (page < 0) page = 0;
+
+                const start = page * BSON_PAGE_SIZE;
+                const slice = docs.slice(start, start + BSON_PAGE_SIZE);
+                const jsonText = stringifyBsonValue(slice);
+                const preview = jsonText.length > 200000
+                    ? jsonText.slice(0, 200000) + '\n\n/* Preview truncated */'
+                    : jsonText;
+
+                preEl.innerHTML = highlightJson(preview);
+                const end = Math.min(docs.length, start + slice.length);
+                statusEl.textContent = docs.length === 0
+                    ? `${activeCollection}: no documents`
+                    : `${activeCollection}: showing ${start + 1}–${end} of ${docs.length}`;
+                prevBtn.disabled = page <= 0;
+                nextBtn.disabled = end >= docs.length;
+            };
+
+            filterInput.addEventListener('input', renderList);
+            prevBtn.addEventListener('click', () => {
+                page -= 1;
+                renderDocs();
+            });
+            nextBtn.addEventListener('click', () => {
+                page += 1;
+                renderDocs();
+            });
+            copyBtn.addEventListener('click', async () => {
+                const text = stringifyBsonValue(getDocs());
+                try {
+                    await navigator.clipboard.writeText(text);
+                    copyBtn.textContent = 'Copied';
+                    setTimeout(() => { copyBtn.textContent = 'Copy JSON'; }, 1200);
+                } catch (e) {
+                    copyBtn.textContent = 'Copy failed';
+                    setTimeout(() => { copyBtn.textContent = 'Copy JSON'; }, 1200);
+                }
+            });
+
+            const close = () => modal.remove();
+            closeBtn.addEventListener('click', close);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) close();
+            });
+
+            document.body.appendChild(modal);
+            renderList();
+            renderDocs();
+            return true;
+        }
+
+        function tryShowBsonContent(fileName, bytes) {
+            try {
+                const dump = parseBsonDump(bytes);
+                return showBsonBrowser(fileName, dump);
+            } catch (e) {
+                console.log('BSON parse failed for', fileName, ':', e.message);
+                return false;
             }
         }
         
@@ -1992,123 +2401,73 @@
             let content;
             let isText = false;
             let displayType = 'text';
+            const fileBytes = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
             
             // Check for actual gzip magic bytes
-            const hasGzipMagicBytes = file.data.length >= 2 && file.data[0] === 0x1f && file.data[1] === 0x8b;
+            const hasGzipMagicBytes = fileBytes.length >= 2 && fileBytes[0] === 0x1f && fileBytes[1] === 0x8b;
             
             if (hasGzipMagicBytes && typeof pako !== 'undefined') {
                 try {
-                    const dataToDecompress = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
-                    const decompressed = pako.inflate(dataToDecompress);
-                    
-                    // Check if decompressed data is BSON
-                    if (decompressed.length > 4 && typeof BSON !== 'undefined') {
-                        try {
-                            // Try to parse as BSON
-                            const bsonData = [];
-                            let offset = 0;
-                            let parseError = false;
-                            
-                            // BSON files can contain multiple documents
-                            while (offset < decompressed.length - 4) {
-                                try {
-                                    // Read document size (first 4 bytes, little-endian)
-                                    const docSize = decompressed[offset] | 
-                                                  (decompressed[offset + 1] << 8) | 
-                                                  (decompressed[offset + 2] << 16) | 
-                                                  (decompressed[offset + 3] << 24);
-                                    
-                                    if (docSize <= 0 || docSize > decompressed.length - offset) break;
-                                    
-                                    const docBytes = decompressed.slice(offset, offset + docSize);
-                                    const doc = BSON.deserialize(docBytes);
-                                    bsonData.push(doc);
-                                    offset += docSize;
-                                } catch (e) {
-                                    console.log('Error parsing BSON document at offset', offset, ':', e.message);
-                                    parseError = true;
-                                    break;
-                                }
-                            }
-                            
-                            if (bsonData.length > 0) {
-                                content = JSON.stringify(bsonData, null, 2);
-                                isText = true;
-                                displayType = 'bson-json';
-                            } else {
-                                throw new Error('No BSON documents parsed');
-                            }
-                        } catch (bsonError) {
-                            console.log('BSON parsing failed:', bsonError.message);
-                            // Fall back to showing info about the BSON file
-                            const hasSelectCollection = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length))).includes('selectcollection');
-                            
-                            if (hasSelectCollection) {
-                                content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
-                                         `This file contains MongoDB BSON data with database collections.\n` +
-                                         `BSON parsing library is available but failed to parse the data.\n\n` +
-                                         `To view the full contents:\n` +
-                                         `1. Download the ZIP file\n` +
-                                         `2. Extract the file (it will be named without .gz extension)\n` +
-                                         `3. Use MongoDB tools: bsondump ${file.name.replace('.gz', '')} > output.json\n\n` +
-                                         `Preview of raw data:\n` +
-                                         generateHexDump(decompressed.slice(0, 512));
-                                displayType = 'bson';
-                                isText = true;
-                            } else {
-                                content = new TextDecoder().decode(decompressed);
-                                isText = true;
-                                displayType = 'gzip-text';
-                            }
-                        }
+                    const decompressed = pako.inflate(fileBytes);
+
+                    if (tryShowBsonContent(fileName, decompressed)) {
+                        return;
+                    }
+
+                    // Prefer BSON-style messaging when the payload looks binary / UniFi dump-like
+                    const sample = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length)));
+                    const looksBinary = Array.from(decompressed.slice(0, 20)).some(b => b < 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09);
+                    if (sample.includes('selectcollection') || looksLikeBson(decompressed) || looksBinary) {
+                        content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
+                                 `Could not parse MongoDB BSON documents in the browser.\n\n` +
+                                 `Preview of raw data:\n` +
+                                 generateHexDump(decompressed.slice(0, 512));
+                        displayType = 'bson';
+                        isText = true;
                     } else {
-                        const firstBytes = Array.from(decompressed.slice(0, 20));
-                        const hasSelectCollection = new TextDecoder().decode(decompressed.slice(0, Math.min(200, decompressed.length))).includes('selectcollection');
-                        
-                        if (hasSelectCollection || (firstBytes.some(b => b < 0x20 && b !== 0x0a && b !== 0x0d && b !== 0x09))) {
-                            // This is BSON data but library not available
-                            content = `BSON Database File (Binary - ${decompressed.length} bytes)\n\n` +
-                                     `This file contains MongoDB BSON data with database collections.\n\n` +
-                                     `To view the full contents:\n` +
-                                     `1. Download the ZIP file\n` +
-                                     `2. Extract the file (it will be named without .gz extension)\n` +
-                                     `3. Use MongoDB tools: bsondump ${file.name.replace('.gz', '')} > output.json\n\n` +
-                                     `Preview of raw data:\n` +
-                                     generateHexDump(decompressed.slice(0, 512));
-                            displayType = 'bson';
-                            isText = true;
-                        } else {
-                            content = new TextDecoder().decode(decompressed);
-                            isText = true;
-                            displayType = 'gzip-text';
-                        }
+                        content = new TextDecoder().decode(decompressed);
+                        isText = true;
+                        displayType = 'gzip-text';
                     }
                 } catch (e) {
                     // If gzip decompression fails, show hex dump
                     console.log('Failed to decompress gzip file:', e);
-                    content = generateHexDump(file.data);
+                    content = generateHexDump(fileBytes);
                     displayType = 'hex';
                 }
             } else if (file.name.endsWith('.gz')) {
                 // .gz file without gzip magic bytes - likely stored raw
+                if (tryShowBsonContent(fileName, fileBytes)) {
+                    return;
+                }
                 try {
-                    content = new TextDecoder().decode(file.data);
+                    content = new TextDecoder().decode(fileBytes);
                     if (content.includes('\n') || content.match(/^[\w\s\-\.,:{}[\]"']+$/) || file.name.endsWith('.properties')) {
                         isText = true;
                         displayType = 'text';
                     } else {
                         // Binary data with .gz extension
-                        content = generateHexDump(file.data);
+                        content = generateHexDump(fileBytes);
                         displayType = 'hex';
                     }
                 } catch (e) {
                     // Binary file
-                    content = generateHexDump(file.data);
+                    content = generateHexDump(fileBytes);
                     displayType = 'hex';
                 }
+            } else if (isDbLikeFileName(fileName) || fileName.toLowerCase().endsWith('.bson') || looksLikeBson(fileBytes)) {
+                if (tryShowBsonContent(fileName, fileBytes)) {
+                    return;
+                }
+                content = `BSON Database File (Binary - ${fileBytes.length} bytes)\n\n` +
+                         `Could not parse MongoDB BSON documents in the browser.\n\n` +
+                         `Preview of raw data:\n` +
+                         generateHexDump(fileBytes.slice(0, 512));
+                displayType = 'bson';
+                isText = true;
             } else {
                 try {
-                    content = new TextDecoder().decode(file.data);
+                    content = new TextDecoder().decode(fileBytes);
                     // Check if it looks like text
                     if (content.includes('\n') || content.match(/^[\w\s\-\.,:{}[\]"']+$/) || file.name.endsWith('.json') || file.name.endsWith('.properties') || file.name.endsWith('.txt')) {
                         isText = true;
@@ -2119,13 +2478,9 @@
                 }
                 
                 if (!isText) {
-                    if (file.name.endsWith('.bson')) {
-                        content = 'BSON Database File (Binary)\n\nTo view contents:\n1. Save this file\n2. Run: bsondump file.bson > file.json\n3. Open the .json file\n\n(bsondump is part of MongoDB Tools)';
-                        displayType = 'text';
-                        isText = true;
-                    } else if (file.name.endsWith('.png') || file.name.endsWith('.jpg')) {
+                    if (file.name.endsWith('.png') || file.name.endsWith('.jpg')) {
                         // Try to create image data URL
-                        const blob = new Blob([file.data], { type: file.name.endsWith('.png') ? 'image/png' : 'image/jpeg' });
+                        const blob = new Blob([fileBytes], { type: file.name.endsWith('.png') ? 'image/png' : 'image/jpeg' });
                         const url = URL.createObjectURL(blob);
                         const modal = document.createElement('div');
                         modal.className = 'modal-overlay';
@@ -2143,7 +2498,7 @@
                         return;
                     } else {
                         // Show hex dump for unknown binary files
-                        content = generateHexDump(file.data);
+                        content = generateHexDump(fileBytes);
                         displayType = 'hex';
                     }
                 }
@@ -2491,9 +2846,14 @@
         }
 
         function getFileTypeBadge(fileName) {
-            const ext = getFileExtension(fileName);
+            const base = (fileName.split('/').pop() || fileName)
+                .replace(/\s*\(decompressed\)\s*$/i, '')
+                .toLowerCase();
+            const ext = getFileExtension(base);
+            if (base === 'db' || base.endsWith('.bson') || /^db([._(-]|$)/.test(base)) {
+                return { label: base.endsWith('.gz') ? 'db.gz' : (ext === 'bson' ? 'bson' : 'db'), className: 'badge-info' };
+            }
             if (!ext) return { label: 'file', className: 'badge-muted' };
-            if (ext === 'bson') return { label: 'bson', className: 'badge-info' };
             if (ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'properties' || ext === 'txt') {
                 return { label: ext, className: 'badge-success' };
             }
