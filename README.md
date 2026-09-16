@@ -2,8 +2,21 @@
 
 A pure **clientside JavaScript** tool to decrypt and explore UniFi backup files (`.unf` and `.unifi`) in your browser.
 
-<img width="1681" height="816" alt="oGkPfHTtUS" src="https://github.com/user-attachments/assets/d580b3a2-a351-473d-9630-113fe4b3c6fc" />
+![Upload screen (dark)](docs/screenshots/01-upload-dark.png)
 
+## Screenshots
+
+| Browse decrypted files | BSON collection browser |
+| --- | --- |
+| ![Network backup contents](docs/screenshots/02-backup-contents-dark.png) | ![BSON browser](docs/screenshots/03-bson-browser-dark.png) |
+
+| File preview | UniFi OS (`.unifi`) backup |
+| --- | --- |
+| ![Properties preview](docs/screenshots/04-properties-preview-dark.png) | ![UniFi OS contents](docs/screenshots/08-unifi-os-contents-dark.png) |
+
+| Light theme | BSON browser (light) |
+| --- | --- |
+| ![Light theme contents](docs/screenshots/05-backup-contents-light.png) | ![BSON browser light](docs/screenshots/06-bson-browser-light.png) |
 
 ## Features
 
