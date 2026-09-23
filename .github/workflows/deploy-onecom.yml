@@ -1,0 +1,39 @@
+name: Deploy to one.com
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - backup-explorer.html
+      - .github/workflows/deploy-onecom.yml
+  workflow_dispatch:
+
+concurrency:
+  group: onecom-unifi
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Stage index.html
+        run: |
+          mkdir -p site
+          cp backup-explorer.html site/index.html
+
+      - name: Deploy via SFTP
+        uses: Dylan700/sftp-upload-action@v1.2.3
+        with:
+          server: ${{ secrets.SSH_DEPLOY_HOST }}
+          username: ${{ secrets.SSH_DEPLOY_USERNAME }}
+          password: ${{ secrets.SSH_DEPLOY_PASSWORD }}
+          port: ${{ secrets.SSH_DEPLOY_PORT }}
+          # Login lands in the SSH user home, not the site root.
+          # ../../webroots/www/unifi is https://roste.org/unifi/
+          # .htaccess in that folder is left in place (delete stays false).
+          uploads: |
+            ./site/ => ../../webroots/www/unifi/
