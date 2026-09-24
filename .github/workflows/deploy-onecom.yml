@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - backup-explorer.html
+      - scripts/deploy_onecom.py
       - .github/workflows/deploy-onecom.yml
   workflow_dispatch:
 
@@ -20,20 +21,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Stage index.html
-        run: |
-          mkdir -p site
-          cp backup-explorer.html site/index.html
-
       - name: Deploy via SFTP
-        uses: Dylan700/sftp-upload-action@v1.2.3
-        with:
-          server: ${{ secrets.SSH_DEPLOY_HOST }}
-          username: ${{ secrets.SSH_DEPLOY_USERNAME }}
-          password: ${{ secrets.SSH_DEPLOY_PASSWORD }}
-          port: ${{ secrets.SSH_DEPLOY_PORT }}
-          # Login lands in the SSH user home, not the site root.
-          # ../../webroots/www/unifi is https://roste.org/unifi/
-          # .htaccess in that folder is left in place (delete stays false).
-          uploads: |
-            ./site/ => ../../webroots/www/unifi/
+        env:
+          SSH_DEPLOY_HOST: ${{ secrets.SSH_DEPLOY_HOST }}
+          SSH_DEPLOY_PORT: ${{ secrets.SSH_DEPLOY_PORT }}
+          SSH_DEPLOY_USERNAME: ${{ secrets.SSH_DEPLOY_USERNAME }}
+          SSH_DEPLOY_PASSWORD: ${{ secrets.SSH_DEPLOY_PASSWORD }}
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet 'paramiko==5.0.0'
+          .venv/bin/python scripts/deploy_onecom.py
