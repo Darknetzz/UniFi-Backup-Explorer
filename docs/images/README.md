@@ -2,7 +2,7 @@
 
 Dark flat-vector branding for README / GitLab avatar / social share.
 
-**Accent:** custom per-repo · canvas `#0f1419` · symbolic / SFW only.
+**Palette:** accent `#0559c9` · secondary `#38bdf8` · canvas `#060e1a`
 
 ## Layouts
 
@@ -25,8 +25,6 @@ Dark flat-vector branding for README / GitLab avatar / social share.
 | `ai/` | Optional AI atmospheric banner |
 
 ## Regenerate
-
-From `_tools`:
 
 ```bash
 python batch_generate.py --only UniFi-Backup-Explorer
