@@ -1,5 +1,8 @@
 # UniFi Backup Explorer Tool
 
+<p align="center"><img src="docs/images/banner-gradient.png" alt="UniFi-Backup-Explorer" width="720"></p>
+
+
 A pure **clientside JavaScript** tool to decrypt and explore UniFi backup files (`.unf` and `.unifi`) in your browser.
 
 ![Upload screen (dark)](docs/screenshots/01-upload-dark.png)
